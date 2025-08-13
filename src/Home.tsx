@@ -1,25 +1,35 @@
-import ixtencoImg from "./assets/ixtenco.jpg";
-import huamantlaImg from "./assets/huamantla.jpg";
-import tlaxcoImg from "./assets/tlaxco.jpg";
+import { useEffect, useState, useRef } from "react";
+import { collection, onSnapshot } from "firebase/firestore";
+import { db } from "./firebase";
+import type { PuebloMagico } from "./types";
+import { Link } from "react-router-dom"; // ⬅️ Import aquí
+import "./home.css";
 
 export default function Home() {
-  const pueblos = [
-    {
-      nombre: "Ixtenco",
-      descripcion: "Pueblo otomí que destaca por su riqueza cultural, artesanías y la iglesia de San Juan Bautista.",
-      imagen: ixtencoImg
-    },
-    {
-      nombre: "Huamantla",
-      descripcion: "Conocido por sus tapetes de aserrín, la feria y la Basílica de la Caridad. Huamantla es historia y tradición.",
-      imagen: huamantlaImg
-    },
-    {
-      nombre: "Tlaxco",
-      descripcion: "Rodeado de bosques y haciendas, Tlaxco ofrece experiencias únicas con arquitectura colonial y queserías.",
-      imagen: tlaxcoImg
-    }
-  ];
+  const [pueblos, setPueblos] = useState<PuebloMagico[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const prevIds = useRef<string[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "pueblosMagicos"), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as PuebloMagico[];
+
+      const newIds = data.map(p => p.id);
+      const addedId = newIds.find(id => !prevIds.current.includes(id));
+      if (addedId) {
+        setHighlightId(addedId);
+        setTimeout(() => setHighlightId(null), 2000);
+      }
+
+      prevIds.current = newIds;
+      setPueblos(data);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   return (
     <div className="main-content">
@@ -28,16 +38,27 @@ export default function Home() {
         <p>Explora los pueblos mágicos con historia</p>
       </div>
       <div className="cards-container">
-        {pueblos.map((pueblo, idx) => (
-          <div key={idx} className="card">
-            <img src={pueblo.imagen} alt={pueblo.nombre} />
-            <div className="card-content">
-              <h3>{pueblo.nombre}</h3>
-              <p>{pueblo.descripcion}</p>
+        {pueblos.length === 0 ? (
+          <p className="no-data">No hay pueblos mágicos registrados aún.</p>
+        ) : (
+          pueblos.map((pueblo) => (
+            <div
+              key={pueblo.id}
+              className={`card fade-in ${highlightId === pueblo.id ? "highlight" : ""}`}
+            >
+              {pueblo.imagen && <img src={pueblo.imagen} alt={pueblo.nombre} />}
+              <div className="card-content">
+                <h3>{pueblo.nombre}</h3>
+                <p>{pueblo.descripcion || "Sin descripción disponible."}</p>
+              </div>
+
+              {/* Botón Link sin romper estilos */}
+              <Link to={`/pueblo/${pueblo.id}`} className="explorar-btn">
+                Explorar
+              </Link>
             </div>
-            <button>Explorar</button>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );

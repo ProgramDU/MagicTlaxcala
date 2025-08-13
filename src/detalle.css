@@ -1,0 +1,33 @@
+/* src/detalle.css */
+.detalle-container {
+  max-width: 800px;
+  margin: auto;
+  padding: 20px;
+}
+
+.volver {
+  display: inline-block;
+  margin-bottom: 15px;
+  text-decoration: none;
+  color: #3498db;
+  font-weight: bold;
+}
+
+.detalle-container img {
+  width: 100%;
+  max-height: 400px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+
+.info-extra p {
+  margin: 5px 0;
+  font-size: 16px;
+}
+
+.loading {
+  text-align: center;
+  font-size: 18px;
+  padding: 30px;
+}

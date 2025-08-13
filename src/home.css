@@ -1,0 +1,48 @@
+.explorar-btn {
+  display: inline-block;
+  background: linear-gradient(135deg, #ff9800, #f44336);
+  color: white;
+  padding: 10px 18px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: bold;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.3s ease;
+}
+
+.explorar-btn:hover {
+  background: linear-gradient(135deg, #f57c00, #d32f2f);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 10px rgba(0,0,0,0.3);
+}
+
+.explorar-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+}
+
+/* Animación de entrada */
+.fade-in {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: fadeInUp 0.5s ease forwards;
+}
+
+@keyframes fadeInUp {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Si quieres que resalten los nuevos */
+.highlight {
+  animation: highlightCard 1s ease-in-out;
+}
+
+@keyframes highlightCard {
+  0% { box-shadow: 0 0 0 rgba(255, 193, 7, 0); }
+  50% { box-shadow: 0 0 20px rgba(255, 193, 7, 0.7); }
+  100% { box-shadow: 0 0 0 rgba(255, 193, 7, 0); }
+}

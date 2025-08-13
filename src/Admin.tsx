@@ -3,17 +3,18 @@ import { useState } from "react";
 import { addDoc, collection } from "firebase/firestore";
 import { db } from "./firebase";
 import type { PuebloMagico } from "./types";
+import "./admin.css"; // ⬅️ Importamos estilos
 
 export default function Admin() {
   const [form, setForm] = useState<PuebloMagico>({
     nombre: "",
+    descripcion: "",
     codigoPostal: "",
     fechaFundacion: "",
     patrono: "",
     santoPatron: "",
     fechaFeria: "",
-    imagen: "",
-    descripcion: ""
+    imagen: ""
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -22,44 +23,34 @@ export default function Admin() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Validaciones mínimas
-    if (!form.nombre) return alert("El nombre es obligatorio.");
-    if (!form.codigoPostal) return alert("El código postal es obligatorio.");
-
-    await addDoc(collection(db, "pueblosMagicos"), {
-      ...form,
-    });
-
-    alert("Pueblo mágico agregado");
+    await addDoc(collection(db, "pueblosMagicos"), form);
+    alert("✅ Pueblo mágico agregado correctamente");
     setForm({
       nombre: "",
+      descripcion: "",
       codigoPostal: "",
       fechaFundacion: "",
       patrono: "",
       santoPatron: "",
       fechaFeria: "",
-      imagen: "",
-      descripcion: ""
+      imagen: ""
     });
   };
 
   return (
-    <div className="main-content">
-      <div className="header">
-        <h1>Agregar Pueblo Mágico</h1>
-        <p>Registra nombre, CP, fechas y más</p>
-      </div>
-
-      <form onSubmit={handleSubmit}>
+    <div className="admin-container">
+      <h1>Agregar Pueblo Mágico</h1>
+      <form className="admin-form" onSubmit={handleSubmit}>
         <input name="nombre" placeholder="Nombre" value={form.nombre} onChange={handleChange} required />
+        <textarea name="descripcion" placeholder="Descripción" value={form.descripcion} onChange={handleChange} required />
         <input name="codigoPostal" placeholder="Código Postal" value={form.codigoPostal} onChange={handleChange} required />
-        <input name="fechaFundacion" type="date" placeholder="Fecha de Fundación" value={form.fechaFundacion} onChange={handleChange} />
-        <input name="patrono" placeholder="Patrono" value={form.patrono} onChange={handleChange} />
-        <input name="santoPatron" placeholder="Santo Patrón" value={form.santoPatron} onChange={handleChange} />
-        <input name="fechaFeria" type="date" placeholder="Fecha de Feria" value={form.fechaFeria} onChange={handleChange} />
-        <input name="imagen" placeholder="URL de imagen (opcional)" value={form.imagen} onChange={handleChange} />
-        <textarea name="descripcion" placeholder="Descripción (opcional)" value={form.descripcion} onChange={handleChange} rows={3} />
+        <label>Fecha de Fundación:</label>
+        <input type="date" name="fechaFundacion" value={form.fechaFundacion} onChange={handleChange} required />
+        <input name="patrono" placeholder="Patrono" value={form.patrono} onChange={handleChange} required />
+        <input name="santoPatron" placeholder="Santo Patrón" value={form.santoPatron} onChange={handleChange} required />
+        <label>Fecha de Feria:</label>
+        <input type="date" name="fechaFeria" value={form.fechaFeria} onChange={handleChange} required />
+        <input name="imagen" placeholder="URL de Imagen" value={form.imagen} onChange={handleChange} />
         <button type="submit">Guardar</button>
       </form>
     </div>
