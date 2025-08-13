@@ -26,7 +26,7 @@ export default function Explorar() {
       </div>
 
       {cargando ? (
-        <p>Cargando...</p>
+        <p>Cargando....</p>
       ) : pueblos.length === 0 ? (
         <p>No hay pueblos registrados aún.</p>
       ) : (
