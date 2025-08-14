@@ -8,7 +8,8 @@ const firebaseConfig = {
   apiKey: "AIzaSyCzZ2cPtIJoQeg3ZPBcBWFbVX2rJ1KsFxM",
   authDomain: "magictlax-b6d7d.firebaseapp.com",
   projectId: "magictlax-b6d7d",
-  storageBucket: "magictlax-b6d7d.firebasestorage.app",
+  //storageBucket: "magictlax-b6d7d.firebasestorage.app",
+  storageBucket: "magictlax-b6d7d.appspot.com",
   messagingSenderId: "260961148884",
   appId: "1:260961148884:web:189275b797962373ff0041"
 };
@@ -20,3 +21,7 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+// src/firebase/config.ts
+console.log("BUCKET EN RUNTIME:", getStorage().app.options['storageBucket']);
+
