@@ -1,12 +1,20 @@
 // src/Pueblo.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { db } from "./firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { db } from "./firebase"; // ajusta si tu ruta real es ./firebase/config
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 
 import Tradiciones from "./tradiciones";
 import Gastronomia from "./gastronomia";
 import Leyendas from "./leyendas";
+
+type Lugar = {
+  nombre: string;
+  descripcion: string;
+  concepto: string;
+  tipoComida?: string;
+  imagen: string; // DataURL comprimido
+};
 
 type Pueblo = {
   id: string;
@@ -18,9 +26,9 @@ type Pueblo = {
   santoPatron?: string;
   fechaFeria?: string;
   imagen: string;
-  restaurantes?: string[];
-  hoteles?: string[];
-  actividades?: string[];
+  restaurantes?: Lugar[];
+  hoteles?: Lugar[];
+  actividades?: Lugar[];
 };
 
 const btnStyle = (active: boolean): React.CSSProperties => ({
@@ -45,7 +53,17 @@ export default function Pueblo() {
     "info" | "gastronomia" | "tradiciones" | "leyendas" | "restaurantes" | "hoteles" | "actividades"
   >("info");
 
-  // Carga inicial del documento de pueblo (desde state o Firestore)
+  // ---------- Estado CRUD para restaurantes/hoteles/actividades ----------
+  const [nuevoLugar, setNuevoLugar] = useState<Lugar>({
+    nombre: "",
+    descripcion: "",
+    concepto: "",
+    tipoComida: "",
+    imagen: "",
+  });
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+
+  // ---------- Carga inicial del documento de pueblo (desde state o Firestore) ----------
   useEffect(() => {
     const fromState = location.state as { pueblo?: Pueblo } | undefined;
     if (fromState?.pueblo) {
@@ -63,6 +81,7 @@ export default function Pueblo() {
     }
   }, [id, location.state]);
 
+  // ---------- Títulos por pestaña ----------
   const tituloContenido = useMemo(() => {
     switch (tab) {
       case "info":
@@ -84,7 +103,141 @@ export default function Pueblo() {
     }
   }, [tab]);
 
+  // ---------- Utilidades restaurante/hotel/actividad ----------
+  const getCampoFromTab = (
+    t: typeof tab
+  ): "restaurantes" | "hoteles" | "actividades" | null => {
+    if (t === "restaurantes") return "restaurantes";
+    if (t === "hoteles") return "hoteles";
+    if (t === "actividades") return "actividades";
+    return null;
+  };
+
+  // Compresión a DataURL (jpeg) en el navegador
+  const handleImagen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const MAX_WIDTH = 800;
+        const scale = Math.min(1, MAX_WIDTH / img.width);
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return alert("No se pudo procesar la imagen.");
+            // Límite ~1 MB post-compresión
+            if (blob.size > 1024 * 1024) {
+              return alert("La imagen es demasiado grande incluso después de comprimir.");
+            }
+            const compressedReader = new FileReader();
+            compressedReader.onloadend = () => {
+              setNuevoLugar((prev) => ({
+                ...prev,
+                imagen: compressedReader.result as string,
+              }));
+            };
+            compressedReader.readAsDataURL(blob);
+          },
+          "image/jpeg",
+          0.8
+        );
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGuardarLugar = async () => {
+    if (!pueblo || !id) return;
+    const campo = getCampoFromTab(tab);
+    if (!campo) return;
+
+    const listaActual = (pueblo[campo] || []) as Lugar[];
+    let actualizado: Lugar[];
+
+    if (editIndex !== null) {
+      actualizado = [...listaActual];
+      actualizado[editIndex] = nuevoLugar;
+    } else {
+      actualizado = [...listaActual, nuevoLugar];
+    }
+
+    await updateDoc(doc(db, "pueblosMagicos", id), { [campo]: actualizado });
+    setPueblo({ ...pueblo, [campo]: actualizado });
+    setNuevoLugar({ nombre: "", descripcion: "", concepto: "", tipoComida: "", imagen: "" });
+    setEditIndex(null);
+    alert(editIndex !== null ? "Lugar actualizado correctamente." : "Lugar agregado correctamente.");
+  };
+
+  const handleEditarLugar = (index: number) => {
+    if (!pueblo) return;
+    const campo = getCampoFromTab(tab);
+    if (!campo) return;
+    const lugar = (pueblo[campo] || [])[index];
+    setNuevoLugar(lugar);
+    setEditIndex(index);
+  };
+
+  const handleEliminarLugar = async (index: number) => {
+    if (!pueblo || !id) return;
+    if (!window.confirm("¿Seguro que quieres eliminar este lugar?")) return;
+
+    const campo = getCampoFromTab(tab);
+    if (!campo) return;
+
+    const actualizado = (pueblo[campo] || []).filter((_, i) => i !== index);
+    await updateDoc(doc(db, "pueblosMagicos", id), { [campo]: actualizado });
+    setPueblo({ ...pueblo, [campo]: actualizado as any });
+  };
+
   if (!pueblo) return <div style={{ padding: 20 }}>Cargando información...</div>;
+
+  // ---------- estilos locales ----------
+  const cardGrid: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+    gap: "15px",
+    marginTop: "15px",
+  };
+
+  const cardStyle: React.CSSProperties = {
+    background: "#fff",
+    borderRadius: "8px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+    padding: "10px",
+    textAlign: "center",
+  };
+
+  const cardImage: React.CSSProperties = {
+    width: "100%",
+    height: "150px",
+    objectFit: "cover",
+    borderRadius: "6px",
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "10px",
+    border: "1px solid #ddd",
+    borderRadius: "8px",
+    marginBottom: "10px",
+  };
+
+  const actionBtn: React.CSSProperties = {
+    padding: "10px 16px",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    color: "#fff",
+    fontWeight: 700,
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "#faf6f0" }}>
@@ -126,6 +279,7 @@ export default function Pueblo() {
       <main style={{ flex: 1, padding: 16, overflow: "auto" }}>
         <h2 style={{ marginTop: 0, marginBottom: 14 }}>{tituloContenido}</h2>
 
+        {/* INFO */}
         {tab === "info" && (
           <section>
             <p>{pueblo.descripcion || "Sin descripción disponible."}</p>
@@ -147,63 +301,118 @@ export default function Pueblo() {
           </section>
         )}
 
+        {/* TRADICIONES / GASTRONOMÍA / LEYENDAS */}
         {tab === "tradiciones" && (
           <section>
             <Tradiciones puebloId={pueblo.id} />
           </section>
         )}
-
         {tab === "gastronomia" && (
           <section>
             <Gastronomia puebloId={pueblo.id} />
           </section>
         )}
-
         {tab === "leyendas" && (
           <section>
             <Leyendas puebloId={pueblo.id} />
           </section>
         )}
 
-        {tab === "restaurantes" && (
+        {/* RESTAURANTES / HOTELES / ACTIVIDADES (CRUD local en el doc del pueblo) */}
+        {["restaurantes", "hoteles", "actividades"].includes(tab) && (
           <section>
-            {pueblo.restaurantes?.length ? (
-              <ul>
-                {pueblo.restaurantes.map((rest, idx) => (
-                  <li key={idx}>{rest}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No hay restaurantes registrados.</p>
-            )}
-          </section>
-        )}
+            <h3>{editIndex !== null ? "Editar" : "Agregar"} {tab.slice(0, -1)}</h3>
 
-        {tab === "hoteles" && (
-          <section>
-            {pueblo.hoteles?.length ? (
-              <ul>
-                {pueblo.hoteles.map((h, idx) => (
-                  <li key={idx}>{h}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No hay hoteles registrados.</p>
+            <input
+              style={inputStyle}
+              placeholder="Nombre"
+              value={nuevoLugar.nombre}
+              onChange={(e) => setNuevoLugar({ ...nuevoLugar, nombre: e.target.value })}
+            />
+            <input
+              style={inputStyle}
+              placeholder="Concepto"
+              value={nuevoLugar.concepto}
+              onChange={(e) => setNuevoLugar({ ...nuevoLugar, concepto: e.target.value })}
+            />
+            {tab === "restaurantes" && (
+              <input
+                style={inputStyle}
+                placeholder="Tipo de comida"
+                value={nuevoLugar.tipoComida}
+                onChange={(e) => setNuevoLugar({ ...nuevoLugar, tipoComida: e.target.value })}
+              />
             )}
-          </section>
-        )}
+            <textarea
+              style={{ ...inputStyle, minHeight: 90 }}
+              placeholder="Descripción"
+              value={nuevoLugar.descripcion}
+              onChange={(e) => setNuevoLugar({ ...nuevoLugar, descripcion: e.target.value })}
+            />
+            <input type="file" accept="image/*" onChange={handleImagen} />
+            {nuevoLugar.imagen && (
+              <img
+                src={nuevoLugar.imagen}
+                alt="Preview"
+                style={{ width: "160px", height: "120px", objectFit: "cover", borderRadius: 8, marginTop: 10 }}
+              />
+            )}
 
-        {tab === "actividades" && (
-          <section>
-            {pueblo.actividades?.length ? (
-              <ul>
-                {pueblo.actividades.map((a, idx) => (
-                  <li key={idx}>{a}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No hay actividades registradas.</p>
-            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={handleGuardarLugar}
+                style={{ ...actionBtn, background: "linear-gradient(90deg,#00b09b,#96c93d)" }}
+              >
+                {editIndex !== null ? "Actualizar" : "Guardar"}
+              </button>
+              {editIndex !== null && (
+                <button
+                  onClick={() => {
+                    setNuevoLugar({ nombre: "", descripcion: "", concepto: "", tipoComida: "", imagen: "" });
+                    setEditIndex(null);
+                  }}
+                  style={{ ...actionBtn, background: "#888" }}
+                >
+                  Cancelar
+                </button>
+              )}
+            </div>
+
+            {/* Listado */}
+            <div style={cardGrid}>
+              {(pueblo[getCampoFromTab(tab)!] as Lugar[] | undefined)?.map((item, idx) => (
+                <div key={idx} style={cardStyle}>
+                  {item.imagen && <img src={item.imagen} alt={item.nombre} style={cardImage} />}
+                  <h4 style={{ margin: "8px 0 4px" }}>{item.nombre}</h4>
+                  <p style={{ margin: 0 }}><strong>Concepto:</strong> {item.concepto}</p>
+                  {tab === "restaurantes" && (
+                    <p style={{ margin: 0 }}>
+                      <strong>Tipo de comida:</strong> {item.tipoComida || "—"}
+                    </p>
+                  )}
+                  <p style={{ marginTop: 6 }}>{item.descripcion}</p>
+
+                  <div style={{ marginTop: 10 }}>
+                    <button
+                      style={{
+                        ...actionBtn,
+                        background: "#4CAF50",
+                        marginRight: 6,
+                      }}
+                      onClick={() => handleEditarLugar(idx)}
+                    >
+                      ✏️ Editar
+                    </button>
+                    <button
+                      style={{ ...actionBtn, background: "#F44336" }}
+                      onClick={() => handleEliminarLugar(idx)}
+                    >
+                      🗑 Eliminar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </section>
         )}
       </main>

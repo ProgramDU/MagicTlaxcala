@@ -1,0 +1,99 @@
+/* Fondo general */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Poppins', sans-serif;
+  background: linear-gradient(135deg, #4facfe, #00f2fe);
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Contenedor del formulario */
+.register-container {
+  background-color: white;
+  padding: 2rem 2.5rem;
+  border-radius: 12px;
+  box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.15);
+  width: 100%;
+  max-width: 400px;
+  text-align: center;
+  animation: fadeIn 0.6s ease-in-out;
+}
+
+/* Animación suave */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Título */
+.register-container h2 {
+  margin-bottom: 1rem;
+  color: #333;
+  font-size: 1.8rem;
+  font-weight: 600;
+}
+
+/* Inputs */
+.register-container input {
+  width: 100%;
+  padding: 12px;
+  margin: 10px 0;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.register-container input:focus {
+  outline: none;
+  border-color: #4facfe;
+  box-shadow: 0px 0px 8px rgba(79, 172, 254, 0.5);
+}
+
+/* Botón */
+.register-container button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 1rem;
+  background: linear-gradient(90deg, #4facfe, #00f2fe);
+  color: white;
+  font-size: 1.1rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.3s ease;
+}
+
+.register-container button:hover {
+  background: linear-gradient(90deg, #00f2fe, #4facfe);
+}
+
+/* Enlace */
+.register-container p {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+}
+
+.register-container a {
+  color: #4facfe;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.register-container a:hover {
+  text-decoration: underline;
+}
+
+/* Adaptación móvil */
+@media (max-width: 480px) {
+  .register-container {
+    padding: 1.5rem;
+  }
+  .register-container h2 {
+    font-size: 1.5rem;
+  }
+}

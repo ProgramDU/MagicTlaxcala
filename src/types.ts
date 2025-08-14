@@ -1,5 +1,6 @@
 // src/types.ts
 export interface PuebloMagico {
+  [x: string]: never[];
   id?: string;
   nombre: string;
   descripcion?: string;
