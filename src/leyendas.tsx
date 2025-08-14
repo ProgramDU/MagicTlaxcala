@@ -5,13 +5,14 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { dataUrlBytes, fileToCompressedDataURL, MAX_DATAURL_BYTES } from "./utils/images";
+import { useIsAdmin } from "./hooks/useIsAdmin";
 
 type Leyenda = {
   id?: string;
   titulo: string;
   descripcion?: string;   // relato / sinopsis
   fuente?: string;        // opcional
-  imagenDataUrl?: string; // opcional
+  imagenDataUrl?: string; // opcional (base64 comprimida)
   createdAt?: any;
 };
 
@@ -35,10 +36,13 @@ const C = {
 type Props = { puebloId: string };
 
 export default function Leyendas({ puebloId }: Props) {
+  const isAdmin = useIsAdmin(); // null | boolean
+
   const [items, setItems] = useState<Leyenda[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // modos solo activos si isAdmin === true
   const [mode, setMode] = useState<"none" | "agregar" | "editar" | "eliminar">("none");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -73,55 +77,83 @@ export default function Leyendas({ puebloId }: Props) {
   }, [puebloId]);
 
   function enter(m:"none"|"agregar"|"editar"|"eliminar"){
-      setMode(m); setSelectedId(null);
-      setTitulo(""); setDescripcion(""); setFuente(""); setFile(null); setPreview(null);
-      setETitulo(""); setEDescripcion(""); setEFuente(""); setEFile(null); setEPreview(null);
-    }
+    if (m !== "none" && isAdmin !== true) return; // bloquear si no es admin
+    setMode(m); setSelectedId(null);
+    setTitulo(""); setDescripcion(""); setFuente(""); setFile(null); setPreview(null);
+    setETitulo(""); setEDescripcion(""); setEFuente(""); setEFile(null); setEPreview(null);
+  }
   function cancel(){ setMode("none"); setSelectedId(null); }
   function onCardClick(l: Leyenda){
-    if (mode==="editar" || mode==="eliminar"){
+    if (mode==="editar" && isAdmin) {
       setSelectedId(prev=>prev===l.id?null:l.id||null);
-      if (mode==="editar"){
-        setETitulo(l.titulo || "");
-        setEDescripcion(l.descripcion || "");
-        setEFuente(l.fuente || "");
-      }
+      setETitulo(l.titulo || "");
+      setEDescripcion(l.descripcion || "");
+      setEFuente(l.fuente || "");
+    } else if (mode==="eliminar" && isAdmin) {
+      setSelectedId(prev=>prev===l.id?null:l.id||null);
     }
   }
   function toggleExpand(id?: string){ setExpandedId(prev=>prev===id?null:id||null); }
 
   async function handleCreate(e:React.FormEvent){
     e.preventDefault();
-    if (!titulo.trim()) return alert("El título es obligatorio.");
+    if (isAdmin !== true) return setErr("Solo administradores pueden agregar.");
+    if (!titulo.trim()) return setErr("El título es obligatorio.");
+
     let dataUrl: string | undefined;
     if (file){
-      if (!file.type.startsWith("image/")) return alert("El archivo debe ser imagen.");
+      if (!file.type.startsWith("image/")) return setErr("El archivo debe ser imagen.");
       dataUrl = await fileToCompressedDataURL(file);
-      if (dataUrlBytes(dataUrl) > MAX_DATAURL_BYTES) return alert("Imagen demasiado grande tras compresión.");
+      if (dataUrlBytes(dataUrl) > MAX_DATAURL_BYTES) return setErr("Imagen demasiado grande tras compresión.");
     }
-    await addDoc(collection(db,"pueblosMagicos",puebloId,"leyendas"),{
-      titulo, descripcion, fuente, ...(dataUrl?{imagenDataUrl:dataUrl}:{ }), createdAt: serverTimestamp(),
-    });
-    enter("none");
+    try {
+      await addDoc(collection(db,"pueblosMagicos",puebloId,"leyendas"),{
+        titulo: titulo.trim(),
+        descripcion: descripcion.trim() || undefined,
+        fuente: fuente.trim() || undefined,
+        ...(dataUrl ? { imagenDataUrl: dataUrl } : {}),
+        createdAt: serverTimestamp(),
+      });
+      enter("none");
+    } catch (e:any) {
+      console.error(e);
+      setErr(e?.message || "Error al guardar.");
+    }
   }
 
   async function confirmDelete(){
+    if (isAdmin !== true) return setErr("Solo administradores pueden eliminar.");
     if(!selectedId) return;
-    await deleteDoc(doc(db,"pueblosMagicos",puebloId,"leyendas",selectedId));
-    enter("none");
+    try {
+      await deleteDoc(doc(db,"pueblosMagicos",puebloId,"leyendas",selectedId));
+      enter("none");
+    } catch (e:any) {
+      console.error(e);
+      setErr(e?.message || "Error al eliminar.");
+    }
   }
 
   async function saveEdit(){
+    if (isAdmin !== true) return setErr("Solo administradores pueden editar.");
     if(!selectedId) return;
-    const updates: Partial<Leyenda> = { titulo:eTitulo, descripcion:eDescripcion, fuente:eFuente };
-    if (eFile){
-      if (!eFile.type.startsWith("image/")) return alert("La nueva imagen no es válida.");
-      const dataUrl = await fileToCompressedDataURL(eFile);
-      if (dataUrlBytes(dataUrl) > MAX_DATAURL_BYTES) return alert("Imagen demasiado grande tras compresión.");
-      updates.imagenDataUrl = dataUrl;
+    const updates: Partial<Leyenda> = {
+      titulo: eTitulo.trim(),
+      descripcion: eDescripcion.trim() || undefined,
+      fuente: eFuente.trim() || undefined
+    };
+    try {
+      if (eFile){
+        if (!eFile.type.startsWith("image/")) return setErr("La nueva imagen no es válida.");
+        const dataUrl = await fileToCompressedDataURL(eFile);
+        if (dataUrlBytes(dataUrl) > MAX_DATAURL_BYTES) return setErr("Imagen demasiado grande tras compresión.");
+        updates.imagenDataUrl = dataUrl;
+      }
+      await updateDoc(doc(db,"pueblosMagicos",puebloId,"leyendas",selectedId), updates as any);
+      enter("none");
+    } catch (e:any) {
+      console.error(e);
+      setErr(e?.message || "Error al actualizar.");
     }
-    await updateDoc(doc(db,"pueblosMagicos",puebloId,"leyendas",selectedId), updates as any);
-    enter("none");
   }
 
   return (
@@ -129,19 +161,27 @@ export default function Leyendas({ puebloId }: Props) {
       {loading && <p>Cargando leyendas...</p>}
       {err && <p style={{ color:"crimson" }}>{err}</p>}
 
-      {!loading && !err && (
+      {!loading && (
         <>
-          {(mode==="editar"||mode==="eliminar") && (
-            <div style={{ background:"#e0d7ff", padding:10, borderRadius:8, marginBottom:10, border:"1px solid #c6b7ff" }}>
-              {mode==="editar" ? "Selecciona una card para editarla." : "Selecciona una card para eliminarla."}
-            </div>
-          )}
+          {/* Solo mostrar la franja de modos si es admin */}
+          {isAdmin ? (
+            <>
+              {(mode==="editar"||mode==="eliminar") && (
+                <div style={{ background:"#e0d7ff", padding:10, borderRadius:8, marginBottom:10, border:"1px solid #c6b7ff" }}>
+                  {mode==="editar" ? "Selecciona una card para editarla." : "Selecciona una card para eliminarla."}
+                </div>
+              )}
+            </>
+          ) : null}
 
           <div style={C.grid}>
             {items.map(l=>{
               const sel = l.id===selectedId, exp = l.id===expandedId;
               return (
-                <div key={l.id} style={C.card(sel)} onClick={()=>onCardClick(l)}>
+                <div key={l.id}
+                     style={C.card(sel)}
+                     onClick={()=>onCardClick(l)}
+                     title={isAdmin ? (mode==="editar" ? "Click para editar" : mode==="eliminar" ? "Click para eliminar" : "Ver detalles") : "Ver detalles"}>
                   {l.imagenDataUrl && <img src={l.imagenDataUrl} alt={l.titulo} style={C.img} />}
                   <div style={C.body}>
                     <div style={C.row}>
@@ -162,15 +202,28 @@ export default function Leyendas({ puebloId }: Props) {
             })}
           </div>
 
-          <div style={{ display:"flex", gap:12, marginTop:18, flexWrap:"wrap" }}>
-            <button onClick={()=>enter("eliminar")} style={{ ...C.action, background:"linear-gradient(45deg,#ff512f,#dd2476)" }}>🗑 Eliminar</button>
-            <button onClick={()=>enter("editar")}   style={{ ...C.action, background:"linear-gradient(90deg,#2193b0,#6dd5ed)" }}>✏️ Editar</button>
-            <button onClick={()=>enter("agregar")}  style={{ ...C.action, background:"linear-gradient(90deg,#7b1fa2,#ab47bc)" }}>➕ Agregar</button>
-            {mode!=="none" && <button onClick={cancel} style={{ ...C.action, background:"#888" }}>Cancelar</button>}
-          </div>
+          {/* Botonera admin-only */}
+          {isAdmin ? (
+            <div style={{ display:"flex", gap:12, marginTop:18, flexWrap:"wrap" }}>
+              <button onClick={()=>enter("eliminar")} style={{ ...C.action, background:"linear-gradient(45deg,#ff512f,#dd2476)" }}>
+                🗑 Eliminar
+              </button>
+              <button onClick={()=>enter("editar")}   style={{ ...C.action, background:"linear-gradient(90deg,#2193b0,#6dd5ed)" }}>
+                ✏️ Editar
+              </button>
+              <button onClick={()=>enter("agregar")}  style={{ ...C.action, background:"linear-gradient(90deg,#7b1fa2,#ab47bc)" }}>
+                ➕ Agregar
+              </button>
+              {mode!=="none" && (
+                <button onClick={cancel} style={{ ...C.action, background:"#888" }}>
+                  Cancelar
+                </button>
+              )}
+            </div>
+          ) : null}
 
           <div style={{ marginTop:18 }}>
-            {mode==="eliminar" && (
+            {isAdmin && mode==="eliminar" && (
               <div style={{ background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16 }}>
                 <h4 style={{ marginTop:0 }}>Eliminar leyenda</h4>
                 {selectedId
@@ -179,7 +232,7 @@ export default function Leyendas({ puebloId }: Props) {
               </div>
             )}
 
-            {mode==="editar" && (
+            {isAdmin && mode==="editar" && (
               <div style={{ background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16 }}>
                 <h4 style={{ marginTop:0 }}>Editar leyenda</h4>
                 {selectedId ? (
@@ -202,7 +255,7 @@ export default function Leyendas({ puebloId }: Props) {
               </div>
             )}
 
-            {mode==="agregar" && (
+            {isAdmin && mode==="agregar" && (
               <div style={{ background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16 }}>
                 <h4 style={{ marginTop:0 }}>Agregar leyenda</h4>
                 <form onSubmit={handleCreate}>
