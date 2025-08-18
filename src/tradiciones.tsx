@@ -1,378 +1,254 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  CollectionReference,
+  collection, query, orderBy, onSnapshot,
+  addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { useIsAdmin } from "./hooks/useIsAdmin";
+import AdminOnly from "./components/AdminOnly";
 
 type Tradicion = {
   id?: string;
   titulo: string;
-  descripcion: string;
-  fecha?: string;          // ej. "Agosto" o "2025-08-14"
-  antecedentes?: string;   // texto corto
-  imagen?: string;         // base64 (comprimida)
-  _createdAt?: any;
-  _updatedAt?: any;
+  fecha?: string;            // ej: 15 de agosto
+  antecedentes?: string;     // historia / contexto
+  descripcion?: string;      // detalle
+  imagenDataUrl?: string;    // base64 opcional
+  createdAt?: any;
 };
 
-type Props = {
-  puebloId: string;
-};
+type Props = { puebloId: string };
+
+const MAX_W = 800;
+const MAX_BYTES = 1_048_576; // 1MB
+
+async function fileToBase64Compressed(file: File): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = rej;
+      im.src = fr.result as string;
+    };
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+  const scale = Math.min(1, MAX_W / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+  // tamaño aproximado bytes de dataURL
+  const bytes = Math.ceil((dataUrl.length * 3) / 4);
+  if (bytes > MAX_BYTES) throw new Error("Imagen demasiado grande tras compresión.");
+  return dataUrl;
+}
 
 export default function Tradiciones({ puebloId }: Props) {
-  const isAdmin = useIsAdmin(); // null | boolean
-
   const [items, setItems] = useState<Tradicion[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
-
-  // modos: ver | agregar | editar-select | eliminar-select | editando
-  const [mode, setMode] = useState<
-    "ver" | "agregar" | "editar-select" | "editando" | "eliminar-select"
-  >("ver");
+  const [mode, setMode] = useState<"none" | "agregar" | "editar" | "eliminar">("none");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // form
-  const [titulo, setTitulo] = useState("");
-  const [descripcion, setDescripcion] = useState("");
-  const [fecha, setFecha] = useState("");
-  const [antecedentes, setAntecedentes] = useState("");
-  const [imagenBase64, setImagenBase64] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // form agregar
+  const [tTitulo, setTTitulo] = useState("");
+  const [tFecha, setTFecha] = useState("");
+  const [tAntecedentes, setTAntecedentes] = useState("");
+  const [tDescripcion, setTDescripcion] = useState("");
+  const [tFile, setTFile] = useState<File | null>(null);
+  const [tPreview, setTPreview] = useState<string | null>(null);
 
-  const colRef = useMemo<CollectionReference>(
-    () => collection(db, "pueblosMagicos", puebloId, "tradiciones") as CollectionReference,
-    [puebloId]
-  );
+  // form editar
+  const [eTitulo, setETitulo] = useState("");
+  const [eFecha, setEFecha] = useState("");
+  const [eAntecedentes, setEAntecedentes] = useState("");
+  const [eDescripcion, setEDescripcion] = useState("");
+  const [eFile, setEFile] = useState<File | null>(null);
+  const [ePreview, setEPreview] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(colRef, orderBy("_createdAt", "desc"));
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Tradicion) }));
-      setItems(data);
+    const ref = collection(db, "pueblosMagicos", puebloId, "tradiciones");
+    const q = query(ref, orderBy("titulo"));
+    const unsub = onSnapshot(q, snap => {
+      setItems(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Tradicion[]);
     });
     return () => unsub();
-  }, [colRef]);
+  }, [puebloId]);
 
-  const resetForm = () => {
-    setTitulo("");
-    setDescripcion("");
-    setFecha("");
-    setAntecedentes("");
-    setImagenBase64("");
+  function resetUI() {
+    setMode("none");
     setSelectedId(null);
-    setMode("ver");
-    setErr(null);
-    setSaving(false);
-  };
+    setExpandedId(null);
+    setTTitulo(""); setTFecha(""); setTAntecedentes(""); setTDescripcion(""); setTFile(null); setTPreview(null);
+    setETitulo(""); setEFecha(""); setEAntecedentes(""); setEDescripcion(""); setEFile(null); setEPreview(null);
+  }
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setErr(null);
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement("canvas");
-          const ctx = canvas.getContext("2d");
-          const MAX_WIDTH = 900;
-          const scale = Math.min(1, MAX_WIDTH / img.width);
-          canvas.width = Math.round(img.width * scale);
-          canvas.height = Math.round(img.height * scale);
-          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-          const b64 = canvas.toDataURL("image/jpeg", 0.7);
-          const approxBytes = Math.ceil((b64.length * 3) / 4);
-          if (approxBytes > 1_048_000) {
-            setErr("La imagen comprimida supera ~1MB. Usa una más pequeña.");
-            return;
-          }
-          setImagenBase64(b64);
-        } catch (e) {
-          console.error(e);
-          setErr("No se pudo procesar la imagen.");
-        }
-      };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // --- acciones admin ---
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isAdmin) return setErr("Solo administradores pueden agregar.");
-    if (!titulo.trim() || !descripcion.trim()) {
-      setErr("Título y descripción son obligatorios.");
-      return;
+  function onCardClick(it: Tradicion) {
+    if (mode === "editar" || mode === "eliminar") {
+      setSelectedId(prev => prev === it.id ? null : it.id || null);
+      if (mode === "editar") {
+        setETitulo(it.titulo || "");
+        setEFecha(it.fecha || "");
+        setEAntecedentes(it.antecedentes || "");
+        setEDescripcion(it.descripcion || "");
+        setEPreview(it.imagenDataUrl || null);
+      }
     }
-    setSaving(true);
-    try {
-      await addDoc(colRef, {
-        titulo: titulo.trim(),
-        descripcion: descripcion.trim(),
-        fecha: fecha.trim() || undefined,
-        antecedentes: antecedentes.trim() || undefined,
-        imagen: imagenBase64 || undefined,
-        _createdAt: serverTimestamp(),
-        _updatedAt: serverTimestamp(),
-      });
-      resetForm();
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || "Error al guardar.");
-      setSaving(false);
-    }
-  };
+  }
 
-  const startEditById = (id: string) => {
-    if (!isAdmin) return;
-    const it = items.find((x) => x.id === id);
-    if (!it) return;
-    setSelectedId(id);
-    setTitulo(it.titulo || "");
-    setDescripcion(it.descripcion || "");
-    setFecha(it.fecha || "");
-    setAntecedentes(it.antecedentes || "");
-    setImagenBase64(it.imagen || "");
-    setMode("editando");
-  };
-
-  const handleUpdate = async (e: React.FormEvent) => {
+  async function crear(e: React.FormEvent) {
     e.preventDefault();
-    if (!isAdmin) return setErr("Solo administradores pueden editar.");
+    if (!tTitulo.trim()) return alert("El título es obligatorio.");
+    let dataUrl: string | undefined;
+    if (tFile) dataUrl = await fileToBase64Compressed(tFile);
+    await addDoc(collection(db, "pueblosMagicos", puebloId, "tradiciones"), {
+      titulo: tTitulo,
+      fecha: tFecha,
+      antecedentes: tAntecedentes,
+      descripcion: tDescripcion,
+      imagenDataUrl: dataUrl,
+      createdAt: serverTimestamp(),
+    });
+    resetUI();
+  }
+
+  async function guardarEdicion() {
     if (!selectedId) return;
-    if (!titulo.trim() || !descripcion.trim()) {
-      setErr("Título y descripción son obligatorios.");
-      return;
-    }
-    setSaving(true);
-    try {
-      await updateDoc(doc(colRef, selectedId), {
-        titulo: titulo.trim(),
-        descripcion: descripcion.trim(),
-        fecha: fecha.trim() || undefined,
-        antecedentes: antecedentes.trim() || undefined,
-        imagen: imagenBase64 || undefined,
-        _updatedAt: serverTimestamp(),
-      });
-      resetForm();
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || "Error al actualizar.");
-      setSaving(false);
-    }
-  };
+    const updates: Partial<Tradicion> = {
+      titulo: eTitulo, fecha: eFecha, antecedentes: eAntecedentes, descripcion: eDescripcion
+    };
+    if (eFile) updates.imagenDataUrl = await fileToBase64Compressed(eFile);
+    await updateDoc(doc(db, "pueblosMagicos", puebloId, "tradiciones", selectedId), updates as any);
+    resetUI();
+  }
 
-  const deleteById = async (id: string) => {
-    if (!isAdmin) return;
-    const it = items.find((x) => x.id === id);
-    if (!it) return;
-    const ok = window.confirm(`¿Eliminar "${it.titulo}"? Esta acción no se puede deshacer.`);
-    if (!ok) return;
-    try {
-      await deleteDoc(doc(colRef, id));
-      if (openId === id) setOpenId(null);
-      if (selectedId === id) setSelectedId(null);
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || "Error al eliminar.");
-    }
-  };
+  async function confirmarEliminar() {
+    if (!selectedId) return;
+    await deleteDoc(doc(db, "pueblosMagicos", puebloId, "tradiciones", selectedId));
+    resetUI();
+  }
 
-  // --- UI ---
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
-      {/* Barra admin */}
-      {isAdmin ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            onClick={() => setMode(mode === "agregar" ? "ver" : "agregar")}
-            className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-          >
-            {mode === "agregar" ? "Cancelar" : "➕ Agregar"}
-          </button>
-
-          <button
-            onClick={() => setMode(mode === "editar-select" ? "ver" : "editar-select")}
-            className={`px-3 py-2 rounded-lg text-white ${
-              mode === "editar-select" ? "bg-indigo-700" : "bg-indigo-600 hover:bg-indigo-700"
-            }`}
-          >
-            ✏️ Editar (seleccionar card)
-          </button>
-
-          <button
-            onClick={() => setMode(mode === "eliminar-select" ? "ver" : "eliminar-select")}
-            className={`px-3 py-2 rounded-lg text-white ${
-              mode === "eliminar-select" ? "bg-rose-700" : "bg-rose-600 hover:bg-rose-700"
-            }`}
-          >
-            🗑 Eliminar (seleccionar card)
-          </button>
-        </div>
-      ) : null}
-
-      {/* Form agregar / editar */}
-      {(mode === "agregar" || mode === "editando") && (
-        <form onSubmit={mode === "agregar" ? handleAdd : handleUpdate} className="grid gap-3 bg-white p-4 rounded-xl shadow">
-          {err && <div className="text-sm text-rose-600">{err}</div>}
-
-          <div className="grid gap-1">
-            <label className="text-sm font-semibold">Título *</label>
-            <input
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-              className="border rounded-lg px-3 py-2"
-              placeholder="Ej. La Noche que Nadie Duerme"
-            />
-          </div>
-
-          <div className="grid gap-1">
-            <label className="text-sm font-semibold">Descripción *</label>
-            <textarea
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              className="border rounded-lg px-3 py-2 min-h-24"
-              placeholder="Descripción de la tradición…"
-            />
-          </div>
-
-          <div className="grid gap-1 sm:grid-cols-2 sm:gap-3">
-            <div className="grid gap-1">
-              <label className="text-sm font-semibold">Fecha (texto o fecha)</label>
-              <input
-                value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
-                className="border rounded-lg px-3 py-2"
-                placeholder='Ej. "Agosto" o "2025-08-14"'
-              />
-            </div>
-
-            <div className="grid gap-1">
-              <label className="text-sm font-semibold">Antecedentes</label>
-              <input
-                value={antecedentes}
-                onChange={(e) => setAntecedentes(e.target.value)}
-                className="border rounded-lg px-3 py-2"
-                placeholder="Breve contexto histórico"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-1">
-            <label className="text-sm font-semibold">Imagen (opcional)</label>
-            <input type="file" accept="image/*" onChange={handleImageChange} />
-            {imagenBase64 && (
-              <img src={imagenBase64} alt="Vista previa" className="mt-2 w-full max-w-md rounded-lg border" />
-            )}
-            <small className="text-slate-500">Se comprime automáticamente (≈1MB máx).</small>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className={`px-4 py-2 rounded-lg text-white ${
-                saving ? "bg-slate-400 cursor-not-allowed" : "bg-emerald-600 hover:bg-emerald-700"
-              }`}
+    <div>
+      {/* grid de cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:16}}>
+        {items.map(it=>{
+          const sel = it.id===selectedId, exp = it.id===expandedId;
+          return (
+            <div
+              key={it.id}
+              onClick={()=>onCardClick(it)}
+              style={{
+                border: sel ? "2px solid #ef4444" : "1px solid #eee",
+                borderRadius:14, background:"#fff",
+                boxShadow: sel ? "0 10px 28px rgba(239,68,68,.25)" : "0 6px 16px rgba(0,0,0,.08)",
+                overflow:"hidden", cursor:(mode==="editar"||mode==="eliminar")?"pointer":"default"
+              }}
             >
-              {saving ? "Guardando…" : mode === "agregar" ? "Guardar tradición" : "Actualizar tradición"}
-            </button>
-            <button type="button" onClick={resetForm} className="px-4 py-2 rounded-lg border hover:bg-slate-50">
-              Cancelar
-            </button>
-          </div>
-        </form>
-      )}
-
-      {/* Grid de cards */}
-      {items.length === 0 ? (
-        <div className="text-slate-500">No hay tradiciones registradas.</div>
-      ) : (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((t) => {
-            const isOpen = openId === t.id;
-            const highlight =
-              mode === "editar-select" || mode === "eliminar-select" ? "ring-2 ring-offset-2 ring-amber-400" : "";
-            return (
-              <div
-                key={t.id}
-                className={`bg-white rounded-xl shadow hover:shadow-lg transition-shadow overflow-hidden cursor-pointer ${highlight}`}
-                onClick={() => {
-                  if (mode === "editar-select" && isAdmin) return startEditById(t.id!);
-                  if (mode === "eliminar-select" && isAdmin) return deleteById(t.id!);
-                  setOpenId((prev) => (prev === t.id ? null : t.id!));
-                }}
-                title={
-                  mode === "editar-select"
-                    ? "Haz click para editar esta tradición"
-                    : mode === "eliminar-select"
-                    ? "Haz click para eliminar esta tradición"
-                    : "Ver detalles"
-                }
-              >
-                {/* Imagen */}
-                {t.imagen ? (
-                  <img src={t.imagen} alt={t.titulo} className="h-40 w-full object-cover" />
-                ) : (
-                  <div className="h-40 w-full bg-slate-200 flex items-center justify-center text-slate-400 text-sm">
-                    Sin imagen
+              {it.imagenDataUrl && <img src={it.imagenDataUrl} alt={it.titulo} style={{width:"100%",height:150,objectFit:"cover"}}/>}
+              <div style={{padding:12}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                  <h3
+                    style={{margin:0,color:"#ea580c",fontWeight:800,fontSize:16,flex:1}}
+                    onClick={(e)=>{ e.stopPropagation(); setExpandedId(prev=>prev===it.id?null:it.id||null); }}
+                    title="Ver detalles"
+                  >
+                    {it.titulo}
+                  </h3>
+                  <span style={{fontSize:18}}>{exp ? "▾" : "▸"}</span>
+                </div>
+                {exp && (
+                  <div style={{marginTop:8,fontSize:13,color:"#334155",lineHeight:1.35}}>
+                    {it.fecha && <p><b>Fecha:</b> {it.fecha}</p>}
+                    {it.antecedentes && <p><b>Antecedentes:</b> {it.antecedentes}</p>}
+                    {it.descripcion && <p><b>Descripción:</b> {it.descripcion}</p>}
                   </div>
                 )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-                {/* Contenido */}
-                <div className="p-4">
-                  {/* Título (acordeón) */}
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-slate-900">{t.titulo}</h3>
-                    <span className="text-xl leading-none select-none">{isOpen ? "−" : "+"}</span>
-                  </div>
+      {/* acciones admin */}
+      <AdminOnly>
+        <div style={{display:"flex",gap:12,marginTop:18,flexWrap:"wrap"}}>
+          <button onClick={()=>setMode("eliminar")} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>🗑 Eliminar</button>
+          <button onClick={()=>setMode("editar")}   style={btn("linear-gradient(90deg,#2193b0,#6dd5ed)")}>✏️ Editar</button>
+          <button onClick={()=>setMode("agregar")}  style={btn("linear-gradient(90deg,#ef4444,#f59e0b)")}>➕ Agregar</button>
+          {mode!=="none" && <button onClick={resetUI} style={btn("#6b7280")}>Cancelar</button>}
+        </div>
 
-                  {/* Panel desplegable */}
-                  {isOpen && (
-                    <div className="mt-3 space-y-2 text-sm text-slate-700">
-                      {t.fecha && (
-                        <p>
-                          <b>Fecha:</b> {t.fecha}
-                        </p>
-                      )}
-                      {t.antecedentes && (
-                        <p>
-                          <b>Antecedentes:</b> {t.antecedentes}
-                        </p>
-                      )}
-                      <p>{t.descripcion}</p>
-                    </div>
-                  )}
+        {/* paneles */}
+        {mode==="eliminar" && (
+          <Panel>
+            <h4>Eliminar tradición</h4>
+            {selectedId
+              ? <button onClick={confirmarEliminar} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>Confirmar eliminación</button>
+              : <p>Selecciona una card para eliminar.</p>}
+          </Panel>
+        )}
 
-                  {/* Pistas de modo admin (opcional) */}
-                  {isAdmin && (mode === "editar-select" || mode === "eliminar-select") && (
-                    <p className="mt-3 text-xs text-amber-700">
-                      {mode === "editar-select"
-                        ? "Haz click en la card para editar."
-                        : "Haz click en la card para eliminar."}
-                    </p>
-                  )}
+        {mode==="editar" && (
+          <Panel>
+            <h4>Editar tradición</h4>
+            {selectedId ? (
+              <div style={{display:"grid",gap:10}}>
+                <Input label="Título *" value={eTitulo} onChange={setETitulo}/>
+                <Input label="Fecha" value={eFecha} onChange={setEFecha}/>
+                <Text label="Antecedentes" value={eAntecedentes} onChange={setEAntecedentes}/>
+                <Text label="Descripción" value={eDescripcion} onChange={setEDescripcion}/>
+                <label style={lab}>Cambiar imagen (opcional)</label>
+                <input type="file" accept="image/*" onChange={e=>{ const f=e.target.files?.[0]||null; setEFile(f); setEPreview(f?URL.createObjectURL(f):null); }}/>
+                {ePreview && <img src={ePreview} style={imgPrev}/>}
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={guardarEdicion} style={btn("linear-gradient(90deg,#10b981,#84cc16)")}>Guardar cambios</button>
+                  <button onClick={resetUI} style={btn("#6b7280")}>Cancelar</button>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            ) : <p>Selecciona una card para editar.</p>}
+          </Panel>
+        )}
+
+        {mode==="agregar" && (
+          <Panel>
+            <h4>Agregar tradición</h4>
+            <form onSubmit={crear} style={{display:"grid",gap:10}}>
+              <Input label="Título *" value={tTitulo} onChange={setTTitulo}/>
+              <Input label="Fecha" value={tFecha} onChange={setTFecha}/>
+              <Text label="Antecedentes" value={tAntecedentes} onChange={setTAntecedentes}/>
+              <Text label="Descripción" value={tDescripcion} onChange={setTDescripcion}/>
+              <label style={lab}>Imagen (opcional)</label>
+              <input type="file" accept="image/*" onChange={(e)=>{ const f=e.target.files?.[0]||null; setTFile(f); setTPreview(f?URL.createObjectURL(f):null); }}/>
+              {tPreview && <img src={tPreview} style={imgPrev}/>}
+              <div style={{display:"flex",gap:8}}>
+                <button type="submit" style={btn("linear-gradient(90deg,#ef4444,#f59e0b)")}>Guardar</button>
+                <button type="button" onClick={resetUI} style={btn("#6b7280")}>Cancelar</button>
+              </div>
+            </form>
+          </Panel>
+        )}
+      </AdminOnly>
     </div>
   );
+}
+
+const lab: React.CSSProperties = { fontWeight:700, marginBottom:6, display:"block" };
+const inputCss: React.CSSProperties = { width:"100%", padding:10, border:"1px solid #ddd", borderRadius:8 };
+const textCss: React.CSSProperties = { ...inputCss, minHeight:90 } as React.CSSProperties;
+const imgPrev: React.CSSProperties = { width:"100%", maxHeight:220, objectFit:"cover", borderRadius:8, marginTop:8 };
+
+function btn(bg: string): React.CSSProperties {
+  return { padding:"10px 16px", border:"none", borderRadius:8, cursor:"pointer", color:"#fff", fontWeight:700, background:bg };
+}
+function Panel({ children }: { children: React.ReactNode }) {
+  return <div style={{ background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16, marginTop:16 }}>{children}</div>;
+}
+function Input({ label, value, onChange }: { label: string; value: string; onChange: (v:string)=>void }) {
+  return (<div><label style={lab}>{label}</label><input style={inputCss} value={value} onChange={e=>onChange(e.target.value)}/></div>);
+}
+function Text({ label, value, onChange }: { label: string; value: string; onChange: (v:string)=>void }) {
+  return (<div><label style={lab}>{label}</label><textarea style={textCss} value={value} onChange={e=>onChange(e.target.value)}/></div>);
 }

@@ -1,7 +1,20 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "compilerOptions": {
+    "target": "ESNext",                         // Lo más moderno que soporta tu runtime
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],   // Librerías base
+    "allowJs": false,                           // Solo TS, no JS
+    "skipLibCheck": true,                       // Omitir chequeo de tipados en node_modules
+    "esModuleInterop": true,                    // Soporta import React from 'react'
+    "allowSyntheticDefaultImports": true,       // Permite default imports aunque no existan
+    "strict": true,                             // Reglas estrictas (puedes poner false si es muy estricto)
+    "forceConsistentCasingInFileNames": true,   // Requiere coincidencia exacta de nombres
+    "module": "ESNext",                         // Output en módulos modernos
+    "moduleResolution": "Node",                 // Resolución de módulos estilo Node
+    "resolveJsonModule": true,                  // Importar JSON como módulo
+    "isolatedModules": true,                    // Compatible con Vite/CRA
+    "noEmit": true,                             // No generar JS (lo hace Vite/Webpack)
+    "jsx": "react-jsx"                          // Nueva transformación JSX (React 17+)
+  },
+  "include": ["src"],                           // Tu carpeta de código fuente
+  "exclude": ["node_modules", "dist"]           // Carpeta a excluir
 }

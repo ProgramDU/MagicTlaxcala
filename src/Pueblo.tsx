@@ -1,7 +1,7 @@
 // src/Pueblo.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { db } from "./firebase"; // ajusta si tu ruta real es ./firebase/config
+import { db } from "./firebase"; 
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 
 import Tradiciones from "./tradiciones";

@@ -1,383 +1,242 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  CollectionReference,
+  collection, query, orderBy, onSnapshot,
+  addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { useIsAdmin } from "./hooks/useIsAdmin";
-import { fileToCompressedDataURL, dataUrlBytes, MAX_DATAURL_BYTES } from "./utils/images";
+import AdminOnly from "./components/AdminOnly";
 
-type GastronomiaItem = {
+type Platillo = {
   id?: string;
-  platillo: string;              // nombre del platillo
-  origen?: string;               // p. ej. "Huamantla", "Tlaxco", "Ixtenco"
-  tipo?: "entrada" | "plato_fuerte" | "postre" | "snack";
-  presentacion?: string;         // p. ej. "plato hondo", "tortilla", "cazuela"
-  sabor?: string;                // p. ej. "dulce", "salado", "picante", "agridulce"
-  significadoTradicional?: string;
-  imagenDataUrl?: string;        // base64 comprimida (opcional)
-  _createdAt?: any;
-  _updatedAt?: any;
+  nombre: string;
+  origen?: string;
+  tipo?: "entrada" | "plato fuerte" | "postre" | "snack" | string;
+  presentacion?: string;
+  sabor?: string;
+  significado?: string;      // significado tradicional
+  imagenDataUrl?: string;
+  createdAt?: any;
 };
 
 type Props = { puebloId: string };
 
-const S = {
-  grid: "grid gap-5 sm:grid-cols-2 lg:grid-cols-3",
-  card: "bg-white rounded-xl shadow hover:shadow-lg transition-shadow overflow-hidden cursor-pointer",
-  img: "h-40 w-full object-cover bg-slate-200",
-  body: "p-4",
-  titleRow: "flex items-center justify-between",
-  title: "font-bold text-slate-900",
-  caret: "text-xl leading-none select-none",
-  detail: "mt-3 space-y-1 text-sm text-slate-700",
-  adminBar: "flex gap-2 flex-wrap",
-  actionBtnBase:
-    "px-3 py-2 rounded-lg text-white disabled:opacity-60 disabled:cursor-not-allowed",
-  btnAdd: "bg-emerald-600 hover:bg-emerald-700",
-  btnEdit: "bg-indigo-600 hover:bg-indigo-700",
-  btnDel: "bg-rose-600 hover:bg-rose-700",
-  btnCancel: "bg-slate-500 hover:bg-slate-600",
-  panel: "bg-white border border-slate-200 rounded-xl p-4",
-  label: "text-sm font-semibold",
-  input: "border rounded-lg px-3 py-2 w-full",
-  textarea: "border rounded-lg px-3 py-2 w-full min-h-24",
-  select: "border rounded-lg px-3 py-2 w-full",
-};
+const MAX_W = 800;
+const MAX_BYTES = 1_048_576;
+
+async function compress(file: File): Promise<string> {
+  const fr = new FileReader();
+  const data = await new Promise<string>((res, rej) => {
+    fr.onload = () => res(fr.result as string);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = data;
+  });
+  const s = Math.min(1, MAX_W / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * s);
+  canvas.height = Math.round(img.height * s);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const out = canvas.toDataURL("image/jpeg", 0.72);
+  const bytes = Math.ceil((out.length * 3) / 4);
+  if (bytes > MAX_BYTES) throw new Error("Imagen demasiado grande tras compresión.");
+  return out;
+}
 
 export default function Gastronomia({ puebloId }: Props) {
-  const isAdmin = useIsAdmin(); // null | boolean
-
-  const [items, setItems] = useState<GastronomiaItem[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
-
-  // modos: ver | agregar | editar-select | editando | eliminar-select
-  const [mode, setMode] = useState<
-    "ver" | "agregar" | "editar-select" | "editando" | "eliminar-select"
-  >("ver");
+  const [items, setItems] = useState<Platillo[]>([]);
+  const [mode, setMode] = useState<"none" | "agregar" | "editar" | "eliminar">("none");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // estado de formulario
-  const [platillo, setPlatillo] = useState("");
-  const [origen, setOrigen] = useState("");
-  const [tipo, setTipo] = useState<"entrada" | "plato_fuerte" | "postre" | "snack" | "">("");
-  const [presentacion, setPresentacion] = useState("");
-  const [sabor, setSabor] = useState("");
-  const [significadoTradicional, setSignificadoTradicional] = useState("");
-  const [imagenDataUrl, setImagenDataUrl] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  // agregar
+  const [gNombre, setGNombre] = useState("");
+  const [gOrigen, setGOrigen] = useState("");
+  const [gTipo, setGTipo] = useState("");
+  const [gPresentacion, setGPresentacion] = useState("");
+  const [gSabor, setGSabor] = useState("");
+  const [gSignificado, setGSignificado] = useState("");
+  const [gFile, setGFile] = useState<File | null>(null);
+  const [gPrev, setGPrev] = useState<string | null>(null);
 
-  const colRef = useMemo<CollectionReference>(
-    () => collection(db, "pueblosMagicos", puebloId, "gastronomia") as CollectionReference,
-    [puebloId]
-  );
+  // editar
+  const [eNombre, setENombre] = useState("");
+  const [eOrigen, setEOrigen] = useState("");
+  const [eTipo, setETipo] = useState("");
+  const [ePresentacion, setEPresentacion] = useState("");
+  const [eSabor, setESabor] = useState("");
+  const [eSignificado, setESignificado] = useState("");
+  const [eFile, setEFile] = useState<File | null>(null);
+  const [ePrev, setEPrev] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(colRef, orderBy("_createdAt", "desc"));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as GastronomiaItem) }));
-        setItems(rows);
-      },
-      (e) => {
-        console.error(e);
-        setErr("No se pudo cargar la gastronomía.");
-      }
-    );
+    const ref = collection(db, "pueblosMagicos", puebloId, "gastronomia");
+    const q = query(ref, orderBy("nombre"));
+    const unsub = onSnapshot(q, snap => {
+      setItems(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Platillo[]);
+    });
     return () => unsub();
-  }, [colRef]);
+  }, [puebloId]);
 
-  const resetForm = () => {
-    setPlatillo("");
-    setOrigen("");
-    setTipo("");
-    setPresentacion("");
-    setSabor("");
-    setSignificadoTradicional("");
-    setImagenDataUrl("");
-    setPreviewUrl(null);
-    setSelectedId(null);
-    setSaving(false);
-    setErr(null);
-    setMode("ver");
-  };
-
-  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    setErr(null);
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setErr("El archivo debe ser una imagen.");
-      return;
-    }
-    try {
-      const b64 = await fileToCompressedDataURL(file); // ya comprime ~0.7
-      if (dataUrlBytes(b64) > MAX_DATAURL_BYTES) {
-        setErr("La imagen comprimida supera ~1MB. Usa una más pequeña.");
-        return;
+  function reset() {
+    setMode("none"); setSelectedId(null); setExpandedId(null);
+    setGNombre(""); setGOrigen(""); setGTipo(""); setGPresentacion(""); setGSabor(""); setGSignificado(""); setGFile(null); setGPrev(null);
+    setENombre(""); setEOrigen(""); setETipo(""); setEPresentacion(""); setESabor(""); setESignificado(""); setEFile(null); setEPrev(null);
+  }
+  function onCardClick(it: Platillo) {
+    if (mode==="editar" || mode==="eliminar") {
+      setSelectedId(prev=>prev===it.id?null:it.id||null);
+      if (mode==="editar") {
+        setENombre(it.nombre||""); setEOrigen(it.origen||""); setETipo(it.tipo||"");
+        setEPresentacion(it.presentacion||""); setESabor(it.sabor||""); setESignificado(it.significado||"");
+        setEPrev(it.imagenDataUrl||null);
       }
-      setImagenDataUrl(b64);
-      setPreviewUrl(URL.createObjectURL(file));
-    } catch (e: any) {
-      console.error(e);
-      setErr("No se pudo procesar la imagen.");
     }
-  };
+  }
 
-  // --- acciones admin ---
-  const startAdd = () => {
-    if (isAdmin !== true) return;
-    setMode("agregar");
-  };
-
-  const startEditSelect = () => {
-    if (isAdmin !== true) return;
-    setMode("editar-select");
-    setSelectedId(null);
-  };
-
-  const startDeleteSelect = () => {
-    if (isAdmin !== true) return;
-    setMode("eliminar-select");
-    setSelectedId(null);
-  };
-
-  const startEditById = (id: string) => {
-    if (isAdmin !== true) return;
-    const it = items.find((x) => x.id === id);
-    if (!it) return;
-    setSelectedId(id);
-    setPlatillo(it.platillo || "");
-    setOrigen(it.origen || "");
-    setTipo((it.tipo as any) || "");
-    setPresentacion(it.presentacion || "");
-    setSabor(it.sabor || "");
-    setSignificadoTradicional(it.significadoTradicional || "");
-    setImagenDataUrl(it.imagenDataUrl || "");
-    setPreviewUrl(null);
-    setMode("editando");
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
+  async function crear(e: React.FormEvent) {
     e.preventDefault();
-    if (isAdmin !== true) return setErr("Solo administradores pueden agregar/editar.");
-    if (!platillo.trim()) return setErr("El nombre del platillo es obligatorio.");
-    setSaving(true);
-    try {
-      if (mode === "agregar") {
-        await addDoc(colRef, {
-          platillo: platillo.trim(),
-          origen: origen.trim() || undefined,
-          tipo: (tipo || undefined) as GastronomiaItem["tipo"],
-          presentacion: presentacion.trim() || undefined,
-          sabor: sabor.trim() || undefined,
-          significadoTradicional: significadoTradicional.trim() || undefined,
-          imagenDataUrl: imagenDataUrl || undefined,
-          _createdAt: serverTimestamp(),
-          _updatedAt: serverTimestamp(),
-        });
-      } else if (mode === "editando" && selectedId) {
-        await updateDoc(doc(colRef, selectedId), {
-          platillo: platillo.trim(),
-          origen: origen.trim() || undefined,
-          tipo: (tipo || undefined) as GastronomiaItem["tipo"],
-          presentacion: presentacion.trim() || undefined,
-          sabor: sabor.trim() || undefined,
-          significadoTradicional: significadoTradicional.trim() || undefined,
-          imagenDataUrl: imagenDataUrl || undefined,
-          _updatedAt: serverTimestamp(),
-        } as any);
-      }
-      resetForm();
-    } catch (e: any) {
-      console.error(e);
-      setSaving(false);
-      setErr(e?.message || "Error al guardar.");
-    }
-  };
-
-  const deleteById = async (id: string) => {
-    if (isAdmin !== true) return;
-    const it = items.find((x) => x.id === id);
-    if (!it) return;
-    const ok = window.confirm(`¿Eliminar "${it.platillo}"? Esta acción no se puede deshacer.`);
-    if (!ok) return;
-    try {
-      await deleteDoc(doc(colRef, id));
-      if (openId === id) setOpenId(null);
-      if (selectedId === id) setSelectedId(null);
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || "Error al eliminar.");
-    }
-  };
+    if (!gNombre.trim()) return alert("Nombre obligatorio.");
+    let img: string | undefined;
+    if (gFile) img = await compress(gFile);
+    await addDoc(collection(db, "pueblosMagicos", puebloId, "gastronomia"), {
+      nombre: gNombre, origen: gOrigen, tipo: gTipo, presentacion: gPresentacion,
+      sabor: gSabor, significado: gSignificado, imagenDataUrl: img, createdAt: serverTimestamp(),
+    });
+    reset();
+  }
+  async function guardar() {
+    if (!selectedId) return;
+    const upd: Partial<Platillo> = {
+      nombre: eNombre, origen: eOrigen, tipo: eTipo, presentacion: ePresentacion, sabor: eSabor, significado: eSignificado
+    };
+    if (eFile) upd.imagenDataUrl = await compress(eFile);
+    await updateDoc(doc(db, "pueblosMagicos", puebloId, "gastronomia", selectedId), upd as any);
+    reset();
+  }
+  async function eliminar() {
+    if (!selectedId) return;
+    await deleteDoc(doc(db, "pueblosMagicos", puebloId, "gastronomia", selectedId));
+    reset();
+  }
 
   return (
-    <div className="grid gap-4">
-      {/* Barra admin (solo admins) */}
-      {isAdmin ? (
-        <div className={S.adminBar}>
-          <button onClick={startDeleteSelect} className={`${S.actionBtnBase} ${S.btnDel}`}>🗑 Eliminar (seleccionar card)</button>
-          <button onClick={startEditSelect}   className={`${S.actionBtnBase} ${S.btnEdit}`}>✏️ Editar (seleccionar card)</button>
-          <button onClick={startAdd}          className={`${S.actionBtnBase} ${S.btnAdd}`}>➕ Agregar</button>
-          {mode !== "ver" && (
-            <button onClick={resetForm} className={`${S.actionBtnBase} ${S.btnCancel}`}>Cancelar</button>
-          )}
-        </div>
-      ) : null}
-
-      {/* Form agregar/editar */}
-      {(mode === "agregar" || mode === "editando") && (
-        <form onSubmit={handleSave} className={S.panel}>
-          {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
-
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={S.label}>Nombre del platillo *</label>
-              <input className={S.input} value={platillo} onChange={(e)=>setPlatillo(e.target.value)} placeholder="Ej. Tlatlapas, Barbacoa..." />
-            </div>
-            <div>
-              <label className={S.label}>Origen</label>
-              <input className={S.input} value={origen} onChange={(e)=>setOrigen(e.target.value)} placeholder="Huamantla, Tlaxco, Ixtenco…" />
-            </div>
-          </div>
-
-          <div className="grid sm:grid-cols-3 gap-3 mt-2">
-            <div>
-              <label className={S.label}>Tipo</label>
-              <select className={S.select} value={tipo} onChange={(e)=>setTipo(e.target.value as any)}>
-                <option value="">— Selecciona —</option>
-                <option value="entrada">Entrada</option>
-                <option value="plato_fuerte">Plato fuerte</option>
-                <option value="postre">Postre</option>
-                <option value="snack">Snack</option>
-              </select>
-            </div>
-            <div>
-              <label className={S.label}>Presentación</label>
-              <input className={S.input} value={presentacion} onChange={(e)=>setPresentacion(e.target.value)} placeholder="Cazuela, tortilla, plato hondo…" />
-            </div>
-            <div>
-              <label className={S.label}>Sabor</label>
-              <input className={S.input} value={sabor} onChange={(e)=>setSabor(e.target.value)} placeholder="Dulce, salado, picante…" />
-            </div>
-          </div>
-
-          <div className="mt-2">
-            <label className={S.label}>Significado tradicional</label>
-            <textarea className={S.textarea} value={significadoTradicional} onChange={(e)=>setSignificadoTradicional(e.target.value)} placeholder="Contexto cultural, fechas en que se consume, simbolismo…" />
-          </div>
-
-          <div className="mt-2">
-            <label className={S.label}>Imagen (opcional)</label>
-            <input type="file" accept="image/*" onChange={handleImageChange} />
-            {previewUrl ? (
-              <img src={previewUrl} alt="preview" className="mt-2 w-full max-w-md rounded-lg border" />
-            ) : imagenDataUrl ? (
-              <img src={imagenDataUrl} alt="preview" className="mt-2 w-full max-w-md rounded-lg border" />
-            ) : null}
-            <small className="text-slate-500 block mt-1">Se comprime automáticamente (≈1MB máx).</small>
-          </div>
-
-          <div className="flex items-center gap-2 mt-3">
-            <button
-              type="submit"
-              disabled={saving}
-              className={`${S.actionBtnBase} ${S.btnAdd}`}
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:16}}>
+        {items.map(it=>{
+          const sel = it.id===selectedId, exp = it.id===expandedId;
+          return (
+            <div
+              key={it.id}
+              onClick={()=>onCardClick(it)}
+              style={{
+                border: sel ? "2px solid #06b6d4" : "1px solid #eee",
+                borderRadius:14, background:"#fff",
+                boxShadow: sel ? "0 10px 28px rgba(6,182,212,.25)" : "0 6px 16px rgba(0,0,0,.08)",
+                overflow:"hidden", cursor:(mode==="editar"||mode==="eliminar")?"pointer":"default"
+              }}
             >
-              {saving ? "Guardando…" : mode === "agregar" ? "Guardar platillo" : "Actualizar platillo"}
-            </button>
-            <button type="button" onClick={resetForm} className={`${S.actionBtnBase} ${S.btnCancel}`}>Cancelar</button>
-          </div>
-        </form>
-      )}
-
-      {/* Grid de cards */}
-      {items.length === 0 ? (
-        <div className="text-slate-500">No hay platillos registrados.</div>
-      ) : (
-        <div className={S.grid}>
-          {items.map((it) => {
-            const isOpen = openId === it.id;
-            // En modos de selección, dar feedback visual
-            const selectRing =
-              mode === "editar-select" || mode === "eliminar-select"
-                ? "ring-2 ring-offset-2 ring-amber-400"
-                : "";
-            return (
-              <div
-                key={it.id}
-                className={`${S.card} ${selectRing}`}
-                onClick={() => {
-                  if (mode === "editar-select" && isAdmin) return startEditById(it.id!);
-                  if (mode === "eliminar-select" && isAdmin) return deleteById(it.id!);
-                  setOpenId((prev) => (prev === it.id ? null : it.id!));
-                }}
-                title={
-                  mode === "editar-select"
-                    ? "Haz click en la card para editar"
-                    : mode === "eliminar-select"
-                    ? "Haz click en la card para eliminar"
-                    : "Ver detalles"
-                }
-              >
-                {/* Imagen */}
-                {it.imagenDataUrl ? (
-                  <img src={it.imagenDataUrl} alt={it.platillo} className={S.img} />
-                ) : (
-                  <div className={`${S.img} flex items-center justify-center text-slate-400 text-sm`}>
-                    Sin imagen
+              {it.imagenDataUrl && <img src={it.imagenDataUrl} alt={it.nombre} style={{width:"100%",height:150,objectFit:"cover"}}/>}
+              <div style={{padding:12}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                  <h3
+                    style={{margin:0,color:"#0ea5e9",fontWeight:800,fontSize:16,flex:1}}
+                    onClick={(e)=>{ e.stopPropagation(); setExpandedId(prev=>prev===it.id?null:it.id||null); }}
+                  >
+                    {it.nombre}
+                  </h3>
+                  <span style={{fontSize:18}}>{exp ? "▾" : "▸"}</span>
+                </div>
+                {exp && (
+                  <div style={{marginTop:8,fontSize:13,color:"#334155",lineHeight:1.35}}>
+                    {it.tipo && <p><b>Tipo:</b> {it.tipo}</p>}
+                    {it.origen && <p><b>Origen:</b> {it.origen}</p>}
+                    {it.presentacion && <p><b>Presentación:</b> {it.presentacion}</p>}
+                    {it.sabor && <p><b>Sabor:</b> {it.sabor}</p>}
+                    {it.significado && <p><b>Significado:</b> {it.significado}</p>}
                   </div>
                 )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-                {/* Contenido */}
-                <div className={S.body}>
-                  <div className={S.titleRow}>
-                    <h3 className={S.title}>{it.platillo}</h3>
-                    <span className={S.caret}>{isOpen ? "−" : "+"}</span>
-                  </div>
+      <AdminOnly>
+        <div style={{display:"flex",gap:12,marginTop:18,flexWrap:"wrap"}}>
+          <button onClick={()=>setMode("eliminar")} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>🗑 Eliminar</button>
+          <button onClick={()=>setMode("editar")}   style={btn("linear-gradient(90deg,#2193b0,#6dd5ed)")}>✏️ Editar</button>
+          <button onClick={()=>setMode("agregar")}  style={btn("linear-gradient(90deg,#06b6d4,#0ea5e9)")}>➕ Agregar</button>
+          {mode!=="none" && <button onClick={reset} style={btn("#6b7280")}>Cancelar</button>}
+        </div>
 
-                  {isOpen && (
-                    <div className={S.detail}>
-                      {it.origen && <p><b>Origen:</b> {it.origen}</p>}
-                      {it.tipo && (
-                        <p>
-                          <b>Tipo:</b>{" "}
-                          {it.tipo === "plato_fuerte" ? "Plato fuerte" : it.tipo.charAt(0).toUpperCase() + it.tipo.slice(1)}
-                        </p>
-                      )}
-                      {it.presentacion && <p><b>Presentación:</b> {it.presentacion}</p>}
-                      {it.sabor && <p><b>Sabor:</b> {it.sabor}</p>}
-                      {it.significadoTradicional && (
-                        <p><b>Significado tradicional:</b> {it.significadoTradicional}</p>
-                      )}
-                    </div>
-                  )}
+        {mode==="eliminar" && (
+          <Panel>
+            <h4>Eliminar platillo</h4>
+            {selectedId
+              ? <button onClick={eliminar} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>Confirmar eliminación</button>
+              : <p>Selecciona una card para eliminar.</p>}
+          </Panel>
+        )}
 
-                  {isAdmin && (mode === "editar-select" || mode === "eliminar-select") && (
-                    <p className="mt-3 text-xs text-amber-700">
-                      {mode === "editar-select"
-                        ? "Haz click en la card para editar."
-                        : "Haz click en la card para eliminar."}
-                    </p>
-                  )}
+        {mode==="editar" && (
+          <Panel>
+            <h4>Editar platillo</h4>
+            {selectedId ? (
+              <div style={{display:"grid",gap:10}}>
+                <Input label="Nombre *" value={eNombre} onChange={setENombre}/>
+                <Input label="Origen" value={eOrigen} onChange={setEOrigen}/>
+                <Input label="Tipo (entrada, plato fuerte...)" value={eTipo} onChange={setETipo}/>
+                <Input label="Presentación" value={ePresentacion} onChange={setEPresentacion}/>
+                <Input label="Sabor" value={eSabor} onChange={setESabor}/>
+                <Text  label="Significado tradicional" value={eSignificado} onChange={setESignificado}/>
+                <label style={lab}>Cambiar imagen (opcional)</label>
+                <input type="file" accept="image/*" onChange={(e)=>{ const f=e.target.files?.[0]||null; setEFile(f); setEPrev(f?URL.createObjectURL(f):null); }}/>
+                {ePrev && <img src={ePrev} style={imgPrev}/>}
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={guardar} style={btn("linear-gradient(90deg,#10b981,#84cc16)")}>Guardar</button>
+                  <button onClick={reset} style={btn("#6b7280")}>Cancelar</button>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            ) : <p>Selecciona una card para editar.</p>}
+          </Panel>
+        )}
+
+        {mode==="agregar" && (
+          <Panel>
+            <h4>Agregar platillo</h4>
+            <form onSubmit={crear} style={{display:"grid",gap:10}}>
+              <Input label="Nombre *" value={gNombre} onChange={setGNombre}/>
+              <Input label="Origen" value={gOrigen} onChange={setGOrigen}/>
+              <Input label="Tipo (entrada, plato fuerte, postre, snack)" value={gTipo} onChange={setGTipo}/>
+              <Input label="Presentación" value={gPresentacion} onChange={setGPresentacion}/>
+              <Input label="Sabor" value={gSabor} onChange={setGSabor}/>
+              <Text  label="Significado tradicional" value={gSignificado} onChange={setGSignificado}/>
+              <label style={lab}>Imagen (opcional)</label>
+              <input type="file" accept="image/*" onChange={(e)=>{ const f=e.target.files?.[0]||null; setGFile(f); setGPrev(f?URL.createObjectURL(f):null); }}/>
+              {gPrev && <img src={gPrev} style={imgPrev}/>}
+              <div style={{display:"flex",gap:8}}>
+                <button type="submit" style={btn("linear-gradient(90deg,#06b6d4,#0ea5e9)")}>Guardar</button>
+                <button type="button" onClick={reset} style={btn("#6b7280")}>Cancelar</button>
+              </div>
+            </form>
+          </Panel>
+        )}
+      </AdminOnly>
     </div>
   );
 }
+
+const lab: React.CSSProperties = { fontWeight:700, marginBottom:6, display:"block" };
+const inputCss: React.CSSProperties = { width:"100%", padding:10, border:"1px solid #ddd", borderRadius:8 };
+const textCss: React.CSSProperties = { ...inputCss, minHeight:90 } as React.CSSProperties;
+const imgPrev: React.CSSProperties = { width:"100%", maxHeight:220, objectFit:"cover", borderRadius:8, marginTop:8 };
+function btn(bg: string): React.CSSProperties { return { padding:"10px 16px", border:"none", borderRadius:8, cursor:"pointer", color:"#fff", fontWeight:700, background:bg }; }
+function Panel({ children }: { children: React.ReactNode }) { return <div style={{ background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16, marginTop:16 }}>{children}</div>; }
+function Input({ label, value, onChange }: { label: string; value: string; onChange: (v:string)=>void }) { return (<div><label style={lab}>{label}</label><input style={inputCss} value={value} onChange={e=>onChange(e.target.value)}/></div>); }
+function Text({ label, value, onChange }: { label: string; value: string; onChange: (v:string)=>void }) { return (<div><label style={lab}>{label}</label><textarea style={textCss} value={value} onChange={e=>onChange(e.target.value)}/></div>); }

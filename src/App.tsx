@@ -1,21 +1,16 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
+// src/App.tsx
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Home from "./Home";
 import Admin from "./Admin";
 import Pueblo from "./Pueblo";
 import Login from "./Login";
 import Register from "./Register";
 import PuebloDetalle from "./PuebloDetalle";
-import Sidebar from "./Sidebar";
+import { db } from "./firebase";
 
-function Layout() {
-  const location = useLocation();
-
-  // Ocultar Sidebar en las rutas que empiecen con /pueblo
-  const hideSidebar = location.pathname.startsWith("/pueblo");
-
+export default function App() {
   return (
-    <div className="app-container">
-      {!hideSidebar && <Sidebar />}
+    <Router>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/admin" element={<Admin />} />
@@ -24,14 +19,7 @@ function Layout() {
         <Route path="/pueblo/:id" element={<Pueblo />} />
         <Route path="/pueblo/:id/detalle" element={<PuebloDetalle />} />
       </Routes>
-    </div>
-  );
-}
-
-export default function App() {
-  return (
-    <Router>
-      <Layout />
     </Router>
   );
 }
+console.log("FIREBASE PROJECT:", db.app.options.projectId);
