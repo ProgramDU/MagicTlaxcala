@@ -7,6 +7,9 @@ import Login from "./Login";
 import Register from "./Register";
 import PuebloDetalle from "./PuebloDetalle";
 import { db } from "./firebase";
+import About from "./about";
+import Contact from "./contact";
+
 
 export default function App() {
   return (
@@ -18,6 +21,10 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/pueblo/:id" element={<Pueblo />} />
         <Route path="/pueblo/:id/detalle" element={<PuebloDetalle />} />
+        <Route path="*" element={<div>404 Not Found</div>} />
+         <Route path="/about" element={<About />} />
+        <Route path="/contact" element={<Contact />} />
+        
       </Routes>
     </Router>
   );

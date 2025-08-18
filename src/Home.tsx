@@ -1,18 +1,9 @@
-// src/Home.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  collection,
-  onSnapshot,
-  deleteDoc,
-  doc,
-  getDoc,
-  query,
-  orderBy,
-} from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signOut, User } from "firebase/auth";
+import { collection, onSnapshot, deleteDoc, doc } from "firebase/firestore";
+import { signOut } from "firebase/auth";
 import { db } from "./firebase";
-import "./home.css";
+import { useIsAdmin } from "./hooks/useIsAdmin";
 
 type Pueblo = {
   id: string;
@@ -21,193 +12,109 @@ type Pueblo = {
   imagen: string;
 };
 
-function useIsAdmin() {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const auth = getAuth();
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        try {
-          const snap = await getDoc(doc(db, "users", u.uid));
-          setIsAdmin(!!snap.exists() && snap.data()?.role === "admin");
-        } catch {
-          setIsAdmin(false);
-        }
-      } else {
-        setIsAdmin(false);
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  return { user, isAdmin, auth };
-}
-
 export default function Home() {
   const navigate = useNavigate();
-  const { user, isAdmin, auth } = useIsAdmin();
-
+  const { user, isAdmin, auth } = useIsAdmin(); // <-  hook
   const [pueblos, setPueblos] = useState<Pueblo[]>([]);
-  const [sidebarPueblos, setSidebarPueblos] = useState<Pueblo[]>([]);
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const qy = query(collection(db, "pueblosMagicos"), orderBy("nombre"));
-    const unsub = onSnapshot(
-      qy,
-      (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Pueblo[];
-        setPueblos(rows);
-        setLoading(false);
-      },
-      (err) => {
-        console.error(err);
-        alert("No se pudieron cargar los pueblos.");
-        setLoading(false);
-      }
-    );
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    const qy = query(collection(db, "pueblosMagicos"), orderBy("nombre"));
-    const unsub = onSnapshot(qy, (snap) => {
+    const unsub = onSnapshot(collection(db, "pueblosMagicos"), (snap) => {
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Pueblo[];
-      setSidebarPueblos(rows.slice(0, 10));
+      setPueblos(rows);
     });
     return () => unsub();
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!isAdmin) return;
-    if (!window.confirm("¿Eliminar este pueblo mágico?")) return;
-    try {
+    if (!isAdmin) return; // seguridad en cliente
+    if (window.confirm("¿Eliminar este pueblo mágico?")) {
       await deleteDoc(doc(db, "pueblosMagicos", id));
-      alert("Pueblo eliminado ✅");
-    } catch (e: any) {
-      console.error(e);
-      alert("No se pudo eliminar: " + (e?.message || "Error desconocido"));
     }
   };
 
   const handleLoginLogout = async () => {
-    if (user) {
-      await signOut(auth);
-    } else {
-      navigate("/login");
-    }
+    if (user) await signOut(auth);
+    else navigate("/login");
   };
 
   const pueblosFiltrados = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const list = term
-      ? pueblos.filter((p) => p.nombre?.toLowerCase().includes(term))
-      : pueblos;
+    const list = term ? pueblos.filter((p) => p.nombre?.toLowerCase().includes(term)) : pueblos;
     return [...list].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
   }, [pueblos, q]);
 
   return (
-    <div className="home-app">
+    <div className="home__wrap">
       {/* SIDEBAR */}
-      <aside className="sidebar">
+      <aside className="home__sidebar">
         <div className="brand">
-          <h2 className="brand-title">
-            <span className="brand-gradient">MagicTlax</span>
+          <h2 className="brand__title">
+            <span className="brand__gradient">MagicTlax</span>
           </h2>
-          <p className="brand-sub">Explora los pueblos mágicos</p>
+          <p className="brand__subtitle">Explora los pueblos mágicos</p>
         </div>
 
-        <div className="session-box">
+        <div className="sessioncard">
           {user ? (
             <>
-              <p className="session-muted">Sesión iniciada</p>
-              <p className="session-email" title={user.email || ""}>
+              <p className="muted">Sesión iniciada</p>
+              <p className="sessioncard__mail" title={user.email || ""}>
                 {user.email}
               </p>
-              {isAdmin ? (
-                <span className="chip chip-admin">Admin</span>
-              ) : (
-                <span className="chip chip-user">Usuario</span>
-              )}
+              {isAdmin && <span className="chip chip--ok">Admin</span>}
+              {!isAdmin && <span className="chip">Usuario</span>}
             </>
           ) : (
-            <p className="session-text">No has iniciado sesión</p>
+            <p className="muted">No has iniciado sesión</p>
           )}
         </div>
 
-        <div className="session-actions">
+        <div className="sideactions">
+          {/* Panel solo si es admin */}
           {isAdmin && (
-            <button
-              onClick={() => navigate("/admin")}
-              className="btn btn-indigo"
-            >
+            <button onClick={() => navigate("/admin")} className="btn btn-indigo">
               ⚙️ Panel administrador
             </button>
           )}
+          {/* Login/Logout */}
           <button
             onClick={handleLoginLogout}
-            className={`btn ${user ? "btn-rose" : "btn-dark"}`}
+            className={`btn ${user ? "btn-danger" : "btn-dark"}`}
           >
             {user ? "🔓 Cerrar sesión" : "🔑 Iniciar sesión"}
           </button>
         </div>
 
-        <nav className="nav">
-          <p className="nav-section">General</p>
-          <button onClick={() => navigate("/")} className="nav-link">🏠 Inicio</button>
-          <button onClick={() => navigate("/mapa")} className="nav-link">🗺️ Mapa</button>
-          <button onClick={() => navigate("/about")} className="nav-link">📖 Acerca de</button>
-          <button onClick={() => navigate("/contact")} className="nav-link">📞 Contacto</button>
-
-          {sidebarPueblos.length > 0 && (
-            <>
-              <p className="nav-section mt">Pueblos</p>
-              <div className="nav-list">
-                {sidebarPueblos.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => navigate(`/pueblo/${p.id}`, { state: { pueblo: p } })}
-                    className="nav-link nav-link--truncate"
-                    title={p.nombre}
-                  >
-                    🪄 {p.nombre}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+        <nav className="sidenav">
+          <p className="sidenav__section">General</p>
+          <button onClick={() => navigate("/")} className="sidenav__item">🏠 Inicio</button>
+          <button onClick={() => navigate("/mapa")} className="sidenav__item">🗺️ Mapa</button>
+          <button onClick={() => navigate("/about")} className="sidenav__item">📖 Acerca de</button>
+          <button onClick={() => navigate("/contact")} className="sidenav__item">📞 Contacto</button>
         </nav>
 
-        <div className="sidebar-footer">© 2025 MagicTlax</div>
+        <div className="sidebar__footer">© 2025 MagicTlax</div>
       </aside>
 
       {/* CONTENIDO */}
-      <div className="content">
+      <div className="home__content">
         {/* HERO */}
         <section className="hero">
-          <div className="hero-bg" />
-          <div className="hero-inner">
-            <h1 className="hero-title">✨ Bienvenid@ a MagicTlax ✨</h1>
-            <p className="hero-sub">
-              Descubre, guarda y comparte la magia de los pueblos de Tlaxcala.
-            </p>
+          <div className="hero__inner">
+            <h1 className="hero__title">✨ Bienvenid@ a MagicTlax ✨</h1>
+            <p className="hero__subtitle">Descubre la magia de los pueblos de Tlaxcala.</p>
 
-            <div className="hero-actions">
+            <div className="hero__actions">
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="🔎 Busca por nombre…"
                 className="input"
               />
+              {/* Botón agregar solo si es admin */}
               {isAdmin && (
-                <button
-                  onClick={() => navigate("/admin")}
-                  className="btn btn-pink"
-                >
+                <button onClick={() => navigate("/admin")} className="btn btn-pink">
                   ➕ Agregar pueblo
                 </button>
               )}
@@ -215,67 +122,57 @@ export default function Home() {
           </div>
         </section>
 
-        {/* GRID DE TARJETAS */}
-        <main className="cards-wrap">
-          {loading ? (
-            <div className="empty">Cargando…</div>
-          ) : pueblosFiltrados.length === 0 ? (
+        {/* GRID */}
+        <main className="cards">
+          {pueblosFiltrados.length === 0 ? (
             <div className="empty">No hay pueblos aún.</div>
           ) : (
-            <div className="cards">
+            <div className="cards__grid">
               {pueblosFiltrados.map((p) => (
                 <article key={p.id} className="card">
-                  <div className="card-img">
+                  <div className="card__imgwrap">
                     {p.imagen ? (
                       <>
-                        <img
-                          src={p.imagen}
-                          alt={p.nombre}
-                          loading="lazy"
-                        />
-                        <div className="card-img-grad" />
-                        <h3 className="card-title-overlay">{p.nombre}</h3>
+                        <img src={p.imagen} alt={p.nombre} className="card__img" loading="lazy" />
+                        <div className="card__fade" />
+                        <h3 className="card__title">{p.nombre}</h3>
                       </>
                     ) : (
-                      <div className="card-img-empty">Sin imagen</div>
+                      <div className="card__imgplaceholder">Sin imagen</div>
                     )}
                   </div>
 
-                  <div className="card-body">
-                    <p className="card-desc">
+                  <div className="card__body">
+                    <p className="card__desc">
                       {p.descripcion || "Sin descripción disponible."}
                     </p>
 
-                    <div className="card-actions">
+                    <div className="card__actions">
                       <button
                         onClick={() => navigate(`/pueblo/${p.id}`, { state: { pueblo: p } })}
-                        className="btn btn-sky btn-xs"
+                        className="btn btn-sky small"
                         title="Explorar"
                       >
                         🌎 Explorar
                       </button>
 
-                      {isAdmin ? (
+                      {/* Editar y Eliminar SOLO si es admin (no se renderizan si no) */}
+                      {isAdmin && (
                         <>
                           <button
                             onClick={() => navigate(`/admin?id=${p.id}`)}
-                            className="btn btn-emerald btn-xs"
+                            className="btn btn-emerald small"
                             title="Editar"
                           >
                             ✏️ Editar
                           </button>
                           <button
                             onClick={() => handleDelete(p.id)}
-                            className="btn btn-rose btn-xs"
+                            className="btn btn-rose small"
                             title="Eliminar"
                           >
                             🗑 Eliminar
                           </button>
-                        </>
-                      ) : (
-                        <>
-                          <button className="btn btn-disabled btn-xs" disabled>✏️ Editar</button>
-                          <button className="btn btn-disabled btn-xs" disabled>🗑 Eliminar</button>
                         </>
                       )}
                     </div>

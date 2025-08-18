@@ -1,38 +1,46 @@
 // src/hooks/useIsAdmin.ts
 import { useEffect, useState } from "react";
-import { getAuth, onAuthStateChanged, type User } from "firebase/auth";
+import { getAuth, onAuthStateChanged, User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 
-type AdminState = {
-  isAdmin: boolean | null; // null = cargando; true/false = resuelto
-  user: User | null;
-};
-
-
-export function useIsAdmin(): AdminState {
-  const [state, setState] = useState<AdminState>({ isAdmin: null, user: null });
+export function useIsAdmin() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const auth = getAuth();
 
   useEffect(() => {
-    const auth = getAuth();
     const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+
       if (!u) {
-        setState({ isAdmin: false, user: null });
+        console.log("[ADMIN] sin usuario");
+        setIsAdmin(false);
         return;
       }
+
+      console.log("[ADMIN] uid:", u.uid, "email:", u.email);
+
       try {
-        // Reglas: users/{uid}.role === "admin"
         const ref = doc(db, "users", u.uid);
         const snap = await getDoc(ref);
-        const role = snap.exists() ? (snap.data() as any).role : undefined;
-        setState({ isAdmin: role === "admin", user: u });
-      } catch {
-        setState({ isAdmin: false, user: u });
+
+        console.log("[ADMIN] users doc exists?", snap.exists());
+
+        if (snap.exists()) {
+          console.log("[ADMIN] users data:", snap.data());
+          setIsAdmin(snap.data()?.role === "admin");
+        } else {
+          setIsAdmin(false);
+        }
+      } catch (e) {
+        console.error("[ADMIN] error leyendo users:", e);
+        setIsAdmin(false);
       }
     });
+
     return () => unsub();
   }, []);
 
-  return state;
+  return { user, isAdmin, auth };
 }
-
