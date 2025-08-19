@@ -8,7 +8,7 @@ import Register from "./Register";
 import PuebloDetalle from "./PuebloDetalle";
 import { db } from "./firebase";
 import About from "./about";
-import Contact from "./contact";
+import Contact from "./Contact";
 
 
 export default function App() {
@@ -22,7 +22,7 @@ export default function App() {
         <Route path="/pueblo/:id" element={<Pueblo />} />
         <Route path="/pueblo/:id/detalle" element={<PuebloDetalle />} />
         <Route path="*" element={<div>404 Not Found</div>} />
-         <Route path="/about" element={<About />} />
+        <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         
       </Routes>

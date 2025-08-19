@@ -1,22 +1,77 @@
-import { useState } from "react";
-import { collection, addDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { collection, addDoc, doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { useIsAdmin } from "./hooks/useIsAdmin";
-import { useNavigate } from "react-router-dom";
-import "./admin.css"; // Asegúrate de tener estilos básicos para el formulario
+import { useNavigate, useSearchParams } from "react-router-dom";
+import "./admin.css";
+
+type PuebloForm = {
+  nombre: string;
+  descripcion: string;
+  codigoPostal: string;
+  fechaFundacion: string;
+  santoPatron: string;
+  fechaFeria: string;
+  imagenBase64: string;
+};
+
+const initialForm: PuebloForm = {
+  nombre: "",
+  descripcion: "",
+  codigoPostal: "",
+  fechaFundacion: "",
+  santoPatron: "",
+  fechaFeria: "",
+  imagenBase64: "",
+};
 
 export default function Admin() {
-  const { user, isAdmin } = useIsAdmin(); // <- objeto { user, isAdmin, auth }
+  const { user, isAdmin } = useIsAdmin(); // <- { user, isAdmin, auth }
   const navigate = useNavigate();
+  const [sp] = useSearchParams();
+  const editingId = sp.get("id"); // si existe, estamos editando
 
-  const [nombre, setNombre] = useState("");
-  const [codigoPostal, setCodigoPostal] = useState("");
-  const [fechaFundacion, setFechaFundacion] = useState("");
-  const [patrono, setPatrono] = useState("");
-  const [santoPatron, setSantoPatron] = useState("");
-  const [fechaFeria, setFechaFeria] = useState("");
-  const [imagenBase64, setImagenBase64] = useState("");
+  const [form, setForm] = useState<PuebloForm>(initialForm);
   const [loading, setLoading] = useState(false);
+  const [loadingDoc, setLoadingDoc] = useState<boolean>(!!editingId);
+
+  // Prefill si estamos editando
+  useEffect(() => {
+    if (!editingId) return;
+    (async () => {
+      try {
+        setLoadingDoc(true);
+        const ref = doc(db, "pueblosMagicos", editingId);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          alert("El pueblo no existe.");
+          navigate("/");
+          return;
+        }
+        const d = snap.data() as any;
+        setForm({
+          nombre: d.nombre || "",
+          descripcion: d.descripcion || "",
+          codigoPostal: d.codigoPostal || "",
+          fechaFundacion: d.fechaFundacion || "",
+          santoPatron: d.santoPatron || "",
+          fechaFeria: d.fechaFeria || "",
+          imagenBase64: d.imagen || "",
+        });
+      } catch (e) {
+        console.error(e);
+        alert("No se pudo cargar el pueblo.");
+      } finally {
+        setLoadingDoc(false);
+      }
+    })();
+  }, [editingId, navigate]);
+
+  const onChange =
+    (k: keyof PuebloForm) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setForm((p) => ({ ...p, [k]: e.target.value }));
+    };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -41,7 +96,7 @@ export default function Admin() {
             alert("La imagen sigue siendo muy grande. Intenta con otra más pequeña.");
             return;
           }
-          setImagenBase64(compressedBase64);
+          setForm((p) => ({ ...p, imagenBase64: compressedBase64 }));
         } catch (err) {
           console.error("Error al comprimir la imagen:", err);
           alert("No se pudo procesar la imagen. Intenta con otra.");
@@ -55,34 +110,34 @@ export default function Admin() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!nombre || !codigoPostal || !imagenBase64) {
+    if (!form.nombre || !form.codigoPostal || !form.imagenBase64) {
       alert("Por favor completa los campos requeridos (Nombre, Código Postal e Imagen).");
       return;
     }
 
     setLoading(true);
     try {
-      await addDoc(collection(db, "pueblosMagicos"), {
-        nombre,
-        codigoPostal,
-        fechaFundacion,
-      
-        santoPatron,
-        fechaFeria,
-        imagen: imagenBase64,
-        restaurantes: [],
-        hoteles: [],
-        actividades: [],
-      });
+      const payload = {
+        nombre: form.nombre,
+        descripcion: form.descripcion,
+        codigoPostal: form.codigoPostal,
+        fechaFundacion: form.fechaFundacion,
+        santoPatron: form.santoPatron,
+        fechaFeria: form.fechaFeria,
+        imagen: form.imagenBase64,
+        ...(editingId ? {} : { restaurantes: [], hoteles: [], actividades: [] }),
+      };
 
-      alert("Pueblo mágico guardado con éxito ✅");
-      setNombre("");
-      setCodigoPostal("");
-      setFechaFundacion("");
-    
-      setSantoPatron("");
-      setFechaFeria("");
-      setImagenBase64("");
+      if (editingId) {
+        await updateDoc(doc(db, "pueblosMagicos", editingId), payload);
+        alert("Pueblo actualizado ✅");
+      } else {
+        await addDoc(collection(db, "pueblosMagicos"), payload);
+        alert("Pueblo mágico guardado con éxito ✅");
+        setForm(initialForm);
+      }
+
+      navigate("/");
     } catch (error) {
       console.error("Error guardando en Firestore:", error);
       alert("Error: " + (error as Error).message);
@@ -91,13 +146,13 @@ export default function Admin() {
     }
   };
 
-  // Estado intermedio mientras se resuelve el rol
-  if (isAdmin === null) {
+  // Estado intermedio mientras se resuelve el rol / doc
+  if (isAdmin === null || loadingDoc) {
     return (
       <div className="admin-page">
         <div className="admin-hero">
           <div className="admin-hero-inner">
-            <h1>Cargando…</h1>
+            <h1>{loadingDoc ? "Cargando pueblo…" : "Cargando…"}</h1>
             <p>Verificando permisos de administrador.</p>
           </div>
         </div>
@@ -128,15 +183,17 @@ export default function Admin() {
       {/* Cabecera con “branding” y descripción ligeros */}
       <section className="admin-hero">
         <div className="admin-hero-inner">
-          <h1>⚙️ Panel de Administración</h1>
-          <p>Añade nuevos pueblos mágicos y gestiona su información.</p>
+          <h1>{editingId ? "✏️ Editar pueblo mágico" : "⚙️ Panel de Administración"}</h1>
+          <p>{editingId ? "Actualiza la información del pueblo." : "Añade nuevos pueblos mágicos y gestiona su información."}</p>
         </div>
       </section>
 
       {/* Contenedor principal */}
       <main className="admin-main">
         <section className="admin-card">
-          <h2 className="admin-card__title">Agregar pueblo mágico</h2>
+          <h2 className="admin-card__title">
+            {editingId ? "Editar" : "Agregar"} pueblo mágico
+          </h2>
           <form className="admin-form" onSubmit={handleSubmit}>
             <div className="field">
               <label className="label">Nombre *</label>
@@ -144,9 +201,20 @@ export default function Admin() {
                 className="input"
                 type="text"
                 placeholder="Nombre"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
+                value={form.nombre}
+                onChange={onChange("nombre")}
                 required
+              />
+            </div>
+
+            <div className="field">
+              <label className="label">Descripción</label>
+              <textarea
+                className="input"
+                placeholder="Describe el pueblo, historia, atractivos…"
+                value={form.descripcion}
+                onChange={onChange("descripcion")}
+                rows={4}
               />
             </div>
 
@@ -156,8 +224,8 @@ export default function Admin() {
                 className="input"
                 type="text"
                 placeholder="Código Postal"
-                value={codigoPostal}
-                onChange={(e) => setCodigoPostal(e.target.value)}
+                value={form.codigoPostal}
+                onChange={onChange("codigoPostal")}
                 required
               />
             </div>
@@ -167,12 +235,10 @@ export default function Admin() {
               <input
                 className="input"
                 type="date"
-                value={fechaFundacion}
-                onChange={(e) => setFechaFundacion(e.target.value)}
+                value={form.fechaFundacion}
+                onChange={onChange("fechaFundacion")}
               />
             </div>
-
-            
 
             <div className="field">
               <label className="label">Santo Patrón</label>
@@ -180,8 +246,8 @@ export default function Admin() {
                 className="input"
                 type="text"
                 placeholder="Santo Patrón"
-                value={santoPatron}
-                onChange={(e) => setSantoPatron(e.target.value)}
+                value={form.santoPatron}
+                onChange={onChange("santoPatron")}
               />
             </div>
 
@@ -190,30 +256,23 @@ export default function Admin() {
               <input
                 className="input"
                 type="date"
-                value={fechaFeria}
-                onChange={(e) => setFechaFeria(e.target.value)}
+                value={form.fechaFeria}
+                onChange={onChange("fechaFeria")}
               />
             </div>
 
             <div className="field">
               <label className="label">Imagen *</label>
               <input className="input" type="file" accept="image/*" onChange={handleImageChange} />
-              {imagenBase64 && (
-                <img className="preview" src={imagenBase64} alt="Vista previa" />
-              )}
-              <small className="muted">Se comprime automáticamente</small>
+              {form.imagenBase64 && <img className="preview" src={form.imagenBase64} alt="Vista previa" />}
+              <small className="muted">Se comprime automáticamente (máx. ~1MB).</small>
             </div>
 
             <div className="actions">
               <button className="btn btn-primary" type="submit" disabled={loading}>
-                {loading ? "Guardando..." : "Guardar Pueblo Mágico"}
+                {loading ? "Guardando..." : editingId ? "Guardar cambios" : "Guardar Pueblo Mágico"}
               </button>
-              <button
-                className="btn btn-ghost"
-                type="button"
-                onClick={() => navigate("/")}
-                disabled={loading}
-              >
+              <button className="btn btn-ghost" type="button" onClick={() => navigate("/")} disabled={loading}>
                 Volver al inicio
               </button>
             </div>

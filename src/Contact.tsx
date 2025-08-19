@@ -1,37 +1,174 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from "react";
+import { getAuth, onAuthStateChanged, User } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
+import "./contact.css";
+
+// Vite env
+const SERVICE_ID = import.meta.env.VITE_EMAILJS_SERVICE_ID as string;
+const TEMPLATE_ID = import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string;
+const PUBLIC_KEY  = import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string;
+const TO_EMAIL    = (import.meta.env.VITE_CONTACT_TO_EMAIL as string) || "tlaxmagicmex@gmail.com";
 
 const Contact: React.FC = () => {
   const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
+  // Campos del formulario
+  const [nombre, setNombre]   = useState("");
+  const [correo, setCorreo]   = useState("");
+  const [asunto, setAsunto]   = useState("");
+  const [mensaje, setMensaje] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    const auth = getAuth();
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setCurrentUser(u || null);
+      if (u) {
+        setCorreo(u.email || "");
+        if (u.displayName && !nombre) setNombre(u.displayName);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!correo || !asunto || !mensaje) {
+      alert("Por favor completa correo, asunto y mensaje.");
+      return;
+    }
+
+    const payload = {
+      service_id: SERVICE_ID,
+      template_id: TEMPLATE_ID,
+      user_id: PUBLIC_KEY,
+      template_params: {
+        from_name: nombre || "(sin nombre)",
+        reply_to:  correo,
+        subject:   `[MagicTlax] ${asunto}`,
+        message:   mensaje,
+        to_email:  TO_EMAIL,
+      },
+    };
+
+    try {
+      setSending(true);
+      const res = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`EmailJS error ${res.status}: ${text}`);
+      }
+      alert("¡Tu mensaje fue enviado! 🎉");
+      setAsunto("");
+      setMensaje("");
+    } catch (err) {
+      console.error("[Contact] send error:", err);
+      alert("No se pudo enviar el mensaje. Inténtalo de nuevo.");
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
-    <div className="min-h-screen bg-white text-black p-10 text-center">
-      <h1 className="text-4xl font-bold text-blue-800 mb-4">Contáctanos</h1>
-      <p className="text-gray-700 max-w-xl mx-auto text-lg mb-6">
-        ¿Tienes preguntas, comentarios o deseas colaborar? ¡Nos encantaría escucharte!
-      </p>
-      <form className="max-w-md mx-auto text-left">
-        <label className="block mb-2 text-sm font-semibold">Nombre</label>
-        <input className="w-full p-2 mb-4 border rounded" type="text" required />
+    <div className="contact-page">
+      {/* Cabecera */}
+      <header className="contact-header">
+        <h1>📬 Contáctanos</h1>
+        <p>Estamos aquí para ayudarte</p>
 
-        <label className="block mb-2 text-sm font-semibold">Correo</label>
-        <input className="w-full p-2 mb-4 border rounded" type="email" required />
+        {/* Botón volver al Home */}
+        <div className="contact-header-actions">
+          <button className="btn btn-ghost" onClick={() => navigate("/")}>
+            ← Volver al Home
+          </button>
+        </div>
+      </header>
 
-        <label className="block mb-2 text-sm font-semibold">Mensaje</label>
-        <textarea className="w-full p-2 mb-4 border rounded" rows={4} required></textarea>
+      {/* Card principal */}
+      <main className="contact-main">
+        <div className="contact-card">
+          <div className="contact-intro">
+            <h2>
+              {currentUser?.email
+                ? `Hola, ${currentUser.displayName || currentUser.email}!`
+                : "Hola, visitante!"}
+            </h2>
+            <p>
+              ¿Tienes <b>preguntas</b>, <b>comentarios</b> o deseas <b>colaborar</b>? ¡Nos encantaría escucharte!
+              Completa el formulario y te responderemos pronto.
+            </p>
+          </div>
 
-        <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-          Enviar
-        </button>
-      </form>
-      <button
-        onClick={() => navigate('/')}
-        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition mb-4 mt-8"
-      >
-        <span className="text-xl">&#8592;</span>
-        Volver al Home
-      </button>
+          <form className="contact-form" onSubmit={handleSubmit}>
+            <div className="field">
+              <label className="label">Nombre</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="Tu nombre"
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label className="label">Correo electrónico *</label>
+              <input
+                className="input"
+                type="email"
+                placeholder="tucorreo@ejemplo.com"
+                value={correo}
+                onChange={(e) => setCorreo(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label className="label">Asunto *</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="Motivo de tu mensaje"
+                value={asunto}
+                onChange={(e) => setAsunto(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label className="label">Mensaje *</label>
+              <textarea
+                className="textarea"
+                placeholder="Cuéntanos en detalle..."
+                value={mensaje}
+                onChange={(e) => setMensaje(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="actions">
+              <button type="submit" className="btn btn-primary" disabled={sending}>
+                {sending ? "Enviando..." : "Enviar mensaje"}
+              </button>
+              <a href="mailto:tlaxmagicmex@gmail.com" className="btn btn-ghost">
+                Escribir directamente
+              </a>
+            </div>
+          </form>
+
+          <div className="contact-footer">
+            <p>
+              También puedes escribirnos a{" "}
+              <a href="mailto:tlaxmagicmex@gmail.com">tlaxmagicmex@gmail.com</a>.
+            </p>
+          </div>
+        </div>
+      </main>
     </div>
   );
 };

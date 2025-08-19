@@ -1,4 +1,4 @@
-// src/Hoteles.tsx
+// src/Actividades.tsx
 import React, { useEffect, useState } from "react";
 import {
   collection, query, orderBy, onSnapshot,
@@ -7,11 +7,11 @@ import {
 import { db } from "./firebase";
 import AdminOnly from "./components/AdminOnly";
 
-type Hotel = {
+type Actividad = {
   id?: string;
   nombre: string;
   concepto?: string;
-  categoria?: string;    // ej. 3 estrellas, boutique, hostal…
+  horario?: string;      // ej. "L-D 9:00–18:00"
   descripcion?: string;
   imagen?: string;       // dataURL comprimida
   createdAt?: any;
@@ -50,50 +50,50 @@ async function compress(file: File): Promise<string> {
   return out;
 }
 
-export default function Hoteles({ puebloId }: Props) {
-  const [items, setItems] = useState<Hotel[]>([]);
+export default function Actividades({ puebloId }: Props) {
+  const [items, setItems] = useState<Actividad[]>([]);
   const [mode, setMode] = useState<"none" | "agregar" | "editar" | "eliminar">("none");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // agregar
-  const [hNombre, setHNombre] = useState("");
-  const [hConcepto, setHConcepto] = useState("");
-  const [hCategoria, setHCategoria] = useState("");
-  const [hDescripcion, setHDescripcion] = useState("");
-  const [hFile, setHFile] = useState<File | null>(null);
-  const [hPrev, setHPrev] = useState<string | null>(null);
+  const [aNombre, setANombre] = useState("");
+  const [aConcepto, setAConcepto] = useState("");
+  const [aHorario, setAHorario] = useState("");
+  const [aDescripcion, setADescripcion] = useState("");
+  const [aFile, setAFile] = useState<File | null>(null);
+  const [aPrev, setAPrev] = useState<string | null>(null);
 
   // editar
   const [eNombre, setENombre] = useState("");
   const [eConcepto, setEConcepto] = useState("");
-  const [eCategoria, setECategoria] = useState("");
+  const [eHorario, setEHorario] = useState("");
   const [eDescripcion, setEDescripcion] = useState("");
   const [eFile, setEFile] = useState<File | null>(null);
   const [ePrev, setEPrev] = useState<string | null>(null);
 
   useEffect(() => {
-    const ref = collection(db, "pueblosMagicos", puebloId, "hoteles");
+    const ref = collection(db, "pueblosMagicos", puebloId, "actividades");
     const qy = query(ref, orderBy("nombre"));
     const unsub = onSnapshot(qy, (snap) => {
-      setItems(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Hotel[]);
+      setItems(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Actividad[]);
     });
     return () => unsub();
   }, [puebloId]);
 
   function reset() {
     setMode("none"); setSelectedId(null); setExpandedId(null);
-    setHNombre(""); setHConcepto(""); setHCategoria(""); setHDescripcion(""); setHFile(null); setHPrev(null);
-    setENombre(""); setEConcepto(""); setECategoria(""); setEDescripcion(""); setEFile(null); setEPrev(null);
+    setANombre(""); setAConcepto(""); setAHorario(""); setADescripcion(""); setAFile(null); setAPrev(null);
+    setENombre(""); setEConcepto(""); setEHorario(""); setEDescripcion(""); setEFile(null); setEPrev(null);
   }
 
-  function onCardClick(it: Hotel) {
+  function onCardClick(it: Actividad) {
     if (mode === "editar" || mode === "eliminar") {
       setSelectedId(prev => prev === it.id ? null : it.id || null);
       if (mode === "editar") {
         setENombre(it.nombre || "");
         setEConcepto(it.concepto || "");
-        setECategoria(it.categoria || "");
+        setEHorario(it.horario || "");
         setEDescripcion(it.descripcion || "");
         setEPrev(it.imagen || null);
       }
@@ -102,15 +102,15 @@ export default function Hoteles({ puebloId }: Props) {
 
   async function crear(e: React.FormEvent) {
     e.preventDefault();
-    if (!hNombre.trim()) return alert("El nombre es obligatorio.");
+    if (!aNombre.trim()) return alert("El nombre es obligatorio.");
     let img: string | undefined;
-    if (hFile) img = await compress(hFile);
+    if (aFile) img = await compress(aFile);
 
-    await addDoc(collection(db, "pueblosMagicos", puebloId, "hoteles"), {
-      nombre: hNombre,
-      concepto: hConcepto,
-      categoria: hCategoria,
-      descripcion: hDescripcion,
+    await addDoc(collection(db, "pueblosMagicos", puebloId, "actividades"), {
+      nombre: aNombre,
+      concepto: aConcepto,
+      horario: aHorario,
+      descripcion: aDescripcion,
       imagen: img,
       createdAt: serverTimestamp(),
     });
@@ -119,21 +119,21 @@ export default function Hoteles({ puebloId }: Props) {
 
   async function guardar() {
     if (!selectedId) return;
-    const upd: Partial<Hotel> = {
+    const upd: Partial<Actividad> = {
       nombre: eNombre,
       concepto: eConcepto,
-      categoria: eCategoria,
+      horario: eHorario,
       descripcion: eDescripcion,
     };
     if (eFile) upd.imagen = await compress(eFile);
 
-    await updateDoc(doc(db, "pueblosMagicos", puebloId, "hoteles", selectedId), upd as any);
+    await updateDoc(doc(db, "pueblosMagicos", puebloId, "actividades", selectedId), upd as any);
     reset();
   }
 
   async function eliminar() {
     if (!selectedId) return;
-    await deleteDoc(doc(db, "pueblosMagicos", puebloId, "hoteles", selectedId));
+    await deleteDoc(doc(db, "pueblosMagicos", puebloId, "actividades", selectedId));
     reset();
   }
 
@@ -171,7 +171,7 @@ export default function Hoteles({ puebloId }: Props) {
                 {exp && (
                   <div style={{ marginTop: 8, fontSize: 13, color: "#334155", lineHeight: 1.35 }}>
                     {it.concepto && <p><b>Concepto:</b> {it.concepto}</p>}
-                    {it.categoria && <p><b>Categoría:</b> {it.categoria}</p>}
+                    {it.horario && <p><b>Horario:</b> {it.horario}</p>}
                     {it.descripcion && <p>{it.descripcion}</p>}
                   </div>
                 )}
@@ -191,7 +191,7 @@ export default function Hoteles({ puebloId }: Props) {
 
         {mode === "eliminar" && (
           <Panel>
-            <h4>Eliminar hotel</h4>
+            <h4>Eliminar actividad</h4>
             {selectedId
               ? <button onClick={eliminar} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>Confirmar eliminación</button>
               : <p>Selecciona una card para eliminar.</p>}
@@ -200,12 +200,12 @@ export default function Hoteles({ puebloId }: Props) {
 
         {mode === "editar" && (
           <Panel>
-            <h4>Editar hotel</h4>
+            <h4>Editar actividad</h4>
             {selectedId ? (
               <div style={{ display: "grid", gap: 10 }}>
                 <Input label="Nombre *" value={eNombre} onChange={setENombre} />
                 <Input label="Concepto" value={eConcepto} onChange={setEConcepto} />
-                <Input label="Categoría" value={eCategoria} onChange={setECategoria} />
+                <Input label="Horario" value={eHorario} onChange={setEHorario} />
                 <Text label="Descripción" value={eDescripcion} onChange={setEDescripcion} />
                 <label style={lab}>Cambiar imagen (opcional)</label>
                 <input type="file" accept="image/*" onChange={(e) => {
@@ -225,19 +225,19 @@ export default function Hoteles({ puebloId }: Props) {
 
         {mode === "agregar" && (
           <Panel>
-            <h4>Agregar hotel</h4>
+            <h4>Agregar actividad</h4>
             <form onSubmit={crear} style={{ display: "grid", gap: 10 }}>
-              <Input label="Nombre *" value={hNombre} onChange={setHNombre} />
-              <Input label="Concepto" value={hConcepto} onChange={setHConcepto} />
-              <Input label="Categoría" value={hCategoria} onChange={setHCategoria} />
-              <Text label="Descripción" value={hDescripcion} onChange={setHDescripcion} />
+              <Input label="Nombre *" value={aNombre} onChange={setANombre} />
+              <Input label="Concepto" value={aConcepto} onChange={setAConcepto} />
+              <Input label="Horario" value={aHorario} onChange={setAHorario} />
+              <Text label="Descripción" value={aDescripcion} onChange={setADescripcion} />
               <label style={lab}>Imagen (opcional)</label>
               <input type="file" accept="image/*" onChange={(e) => {
                 const f = e.target.files?.[0] || null;
-                setHFile(f);
-                setHPrev(f ? URL.createObjectURL(f) : null);
+                setAFile(f);
+                setAPrev(f ? URL.createObjectURL(f) : null);
               }} />
-              {hPrev && <img src={hPrev} style={imgPrev} />}
+              {aPrev && <img src={aPrev} style={imgPrev} />}
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="submit" style={btn("linear-gradient(90deg,#7c3aed,#ec4899)")}>Guardar</button>
                 <button type="button" onClick={reset} style={btn("#6b7280")}>Cancelar</button>

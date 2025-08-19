@@ -1,88 +1,288 @@
-import { useState, useEffect } from "react";
-import { collection, addDoc, getDocs } from "firebase/firestore";
+// src/Restaurantes.tsx
+import React, { useEffect, useState } from "react";
+import {
+  collection, query, orderBy, onSnapshot,
+  addDoc, updateDoc, deleteDoc, doc, serverTimestamp
+} from "firebase/firestore";
 import { db } from "./firebase";
+import AdminOnly from "./components/AdminOnly";
 
-export default function Restaurantes() {
-  const isAdmin = localStorage.getItem("isAdmin") === "true";
-  const [restaurantes, setRestaurantes] = useState<any[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [nombre, setNombre] = useState("");
-  const [tipoComida, setTipoComida] = useState("");
-  const [descripcion, setDescripcion] = useState("");
-  const [imagenBase64, setImagenBase64] = useState("");
+type Restaurante = {
+  id?: string;
+  nombre: string;
+  concepto?: string;
+  tipoComida?: string;
+  descripcion?: string;
+  imagen?: string;        // dataURL comprimida
+  createdAt?: any;
+};
 
-  const fetchData = async () => {
-    const snapshot = await getDocs(collection(db, "restaurantes"));
-    setRestaurantes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-  };
+type Props = { puebloId: string };
 
-  useEffect(() => { fetchData(); }, []);
+const MAX_W = 800;
+const MAX_BYTES = 1_048_576; // ~1MB
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.src = reader.result as string;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        const MAX_WIDTH = 800;
-        const scaleSize = MAX_WIDTH / img.width;
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scaleSize;
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const compressed = canvas.toDataURL("image/jpeg", 0.7);
-        if (Math.ceil((compressed.length * 3) / 4) > 1048576) {
-          alert("Imagen demasiado grande.");
-          return;
-        }
-        setImagenBase64(compressed);
-      };
-    };
-    reader.readAsDataURL(file);
-  };
+async function compress(file: File): Promise<string> {
+  const fr = new FileReader();
+  const data = await new Promise<string>((res, rej) => {
+    fr.onload = () => res(fr.result as string);
+    fr.onerror = rej;
+    fr.readAsDataURL(file);
+  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nombre || !tipoComida || !descripcion || !imagenBase64) {
-      alert("Completa todos los campos");
-      return;
-    }
-    await addDoc(collection(db, "restaurantes"), {
-      nombre, tipoComida, descripcion, imagen: imagenBase64
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = data;
+  });
+
+  const scale = Math.min(1, MAX_W / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  const out = canvas.toDataURL("image/jpeg", 0.72);
+  const bytes = Math.ceil((out.length * 3) / 4);
+  if (bytes > MAX_BYTES) throw new Error("Imagen demasiado grande tras compresión.");
+  return out;
+}
+
+export default function Restaurantes({ puebloId }: Props) {
+  const [items, setItems] = useState<Restaurante[]>([]);
+  const [mode, setMode] = useState<"none" | "agregar" | "editar" | "eliminar">("none");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // agregar
+  const [rNombre, setRNombre] = useState("");
+  const [rConcepto, setRConcepto] = useState("");
+  const [rTipo, setRTipo] = useState("");
+  const [rDescripcion, setRDescripcion] = useState("");
+  const [rFile, setRFile] = useState<File | null>(null);
+  const [rPrev, setRPrev] = useState<string | null>(null);
+
+  // editar
+  const [eNombre, setENombre] = useState("");
+  const [eConcepto, setEConcepto] = useState("");
+  const [eTipo, setETipo] = useState("");
+  const [eDescripcion, setEDescripcion] = useState("");
+  const [eFile, setEFile] = useState<File | null>(null);
+  const [ePrev, setEPrev] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ref = collection(db, "pueblosMagicos", puebloId, "restaurantes");
+    const qy = query(ref, orderBy("nombre"));
+    const unsub = onSnapshot(qy, (snap) => {
+      setItems(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Restaurante[]);
     });
-    alert("Restaurante agregado ✅");
-    setNombre(""); setTipoComida(""); setDescripcion(""); setImagenBase64("");
-    setShowForm(false);
-    fetchData();
-  };
+    return () => unsub();
+  }, [puebloId]);
+
+  function reset() {
+    setMode("none"); setSelectedId(null); setExpandedId(null);
+    setRNombre(""); setRConcepto(""); setRTipo(""); setRDescripcion(""); setRFile(null); setRPrev(null);
+    setENombre(""); setEConcepto(""); setETipo(""); setEDescripcion(""); setEFile(null); setEPrev(null);
+  }
+
+  function onCardClick(it: Restaurante) {
+    if (mode === "editar" || mode === "eliminar") {
+      setSelectedId(prev => prev === it.id ? null : it.id || null);
+      if (mode === "editar") {
+        setENombre(it.nombre || "");
+        setEConcepto(it.concepto || "");
+        setETipo(it.tipoComida || "");
+        setEDescripcion(it.descripcion || "");
+        setEPrev(it.imagen || null);
+      }
+    }
+  }
+
+  // Crear
+  async function crear(e: React.FormEvent) {
+    e.preventDefault();
+    if (!rNombre.trim()) return alert("El nombre es obligatorio.");
+    let img: string | undefined;
+    if (rFile) img = await compress(rFile);
+
+    await addDoc(collection(db, "pueblosMagicos", puebloId, "restaurantes"), {
+      nombre: rNombre,
+      concepto: rConcepto,
+      tipoComida: rTipo,
+      descripcion: rDescripcion,
+      imagen: img,
+      createdAt: serverTimestamp(),
+    });
+    reset();
+  }
+
+  // Guardar edición
+  async function guardar() {
+    if (!selectedId) return;
+    const upd: Partial<Restaurante> = {
+      nombre: eNombre,
+      concepto: eConcepto,
+      tipoComida: eTipo,
+      descripcion: eDescripcion,
+    };
+    if (eFile) upd.imagen = await compress(eFile);
+
+    await updateDoc(doc(db, "pueblosMagicos", puebloId, "restaurantes", selectedId), upd as any);
+    reset();
+  }
+
+  // Eliminar
+  async function eliminar() {
+    if (!selectedId) return;
+    await deleteDoc(doc(db, "pueblosMagicos", puebloId, "restaurantes", selectedId));
+    reset();
+  }
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h2>Restaurantes</h2>
-      {isAdmin && <button onClick={() => setShowForm(!showForm)}>{showForm ? "Cancelar" : "Añadir lugar"}</button>}
-      {showForm && (
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
-          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre" />
-          <input value={tipoComida} onChange={(e) => setTipoComida(e.target.value)} placeholder="Tipo de comida" />
-          <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Descripción" />
-          <input type="file" accept="image/*" onChange={handleImageChange} />
-          {imagenBase64 && <img src={imagenBase64} alt="Vista previa" style={{ maxWidth: "200px" }} />}
-          <button type="submit">Guardar</button>
-        </form>
-      )}
-      <div style={{ marginTop: "20px" }}>
-        {restaurantes.map((r) => (
-          <div key={r.id} style={{ border: "1px solid #ccc", padding: "10px", marginBottom: "10px" }}>
-            <h3>{r.nombre}</h3>
-            <p><b>Tipo:</b> {r.tipoComida}</p>
-            <p>{r.descripcion}</p>
-            {r.imagen && <img src={r.imagen} alt={r.nombre} style={{ maxWidth: "200px" }} />}
-          </div>
-        ))}
+    <div>
+      {/* GRID de cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 16 }}>
+        {items.map(it => {
+          const sel = it.id === selectedId, exp = it.id === expandedId;
+          return (
+            <div
+              key={it.id}
+              onClick={() => onCardClick(it)}
+              style={{
+                border: sel ? "2px solid #7c3aed" : "1px solid #eee",
+                borderRadius: 14,
+                background: "#fff",
+                boxShadow: sel ? "0 10px 28px rgba(124,58,237,.25)" : "0 6px 16px rgba(0,0,0,.08)",
+                overflow: "hidden",
+                cursor: (mode === "editar" || mode === "eliminar") ? "pointer" : "default"
+              }}
+            >
+              {it.imagen && (
+                <img
+                  src={it.imagen}
+                  alt={it.nombre}
+                  style={{ width: "100%", height: 150, objectFit: "cover" }}
+                />
+              )}
+              <div style={{ padding: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <h3
+                    style={{ margin: 0, color: "#7c3aed", fontWeight: 800, fontSize: 16, flex: 1 }}
+                    onClick={(e) => { e.stopPropagation(); setExpandedId(prev => prev === it.id ? null : it.id || null); }}
+                  >
+                    {it.nombre}
+                  </h3>
+                  <span style={{ fontSize: 18 }}>{exp ? "▾" : "▸"}</span>
+                </div>
+
+                {exp && (
+                  <div style={{ marginTop: 8, fontSize: 13, color: "#334155", lineHeight: 1.35 }}>
+                    {it.concepto && <p><b>Concepto:</b> {it.concepto}</p>}
+                    {it.tipoComida && <p><b>Tipo de comida:</b> {it.tipoComida}</p>}
+                    {it.descripcion && <p>{it.descripcion}</p>}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
+
+      {/* Controles solo admin */}
+      <AdminOnly>
+        <div style={{ display: "flex", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+          <button onClick={() => setMode("eliminar")} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>🗑 Eliminar</button>
+          <button onClick={() => setMode("editar")} style={btn("linear-gradient(90deg,#7c3aed,#a78bfa)")}>✏️ Editar</button>
+          <button onClick={() => setMode("agregar")} style={btn("linear-gradient(90deg,#7c3aed,#ec4899)")}>➕ Agregar</button>
+          {mode !== "none" && <button onClick={reset} style={btn("#6b7280")}>Cancelar</button>}
+        </div>
+
+        {mode === "eliminar" && (
+          <Panel>
+            <h4>Eliminar restaurante</h4>
+            {selectedId
+              ? <button onClick={eliminar} style={btn("linear-gradient(45deg,#ff512f,#dd2476)")}>Confirmar eliminación</button>
+              : <p>Selecciona una card para eliminar.</p>}
+          </Panel>
+        )}
+
+        {mode === "editar" && (
+          <Panel>
+            <h4>Editar restaurante</h4>
+            {selectedId ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <Input label="Nombre *" value={eNombre} onChange={setENombre} />
+                <Input label="Concepto" value={eConcepto} onChange={setEConcepto} />
+                <Input label="Tipo de comida" value={eTipo} onChange={setETipo} />
+                <Text label="Descripción" value={eDescripcion} onChange={setEDescripcion} />
+                <label style={lab}>Cambiar imagen (opcional)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setEFile(f);
+                    setEPrev(f ? URL.createObjectURL(f) : null);
+                  }}
+                />
+                {ePrev && <img src={ePrev} style={imgPrev} />}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={guardar} style={btn("linear-gradient(90deg,#10b981,#84cc16)")}>Guardar</button>
+                  <button onClick={reset} style={btn("#6b7280")}>Cancelar</button>
+                </div>
+              </div>
+            ) : <p>Selecciona una card para editar.</p>}
+          </Panel>
+        )}
+
+        {mode === "agregar" && (
+          <Panel>
+            <h4>Agregar restaurante</h4>
+            <form onSubmit={crear} style={{ display: "grid", gap: 10 }}>
+              <Input label="Nombre *" value={rNombre} onChange={setRNombre} />
+              <Input label="Concepto" value={rConcepto} onChange={setRConcepto} />
+              <Input label="Tipo de comida" value={rTipo} onChange={setRTipo} />
+              <Text label="Descripción" value={rDescripcion} onChange={setRDescripcion} />
+              <label style={lab}>Imagen (opcional)</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setRFile(f);
+                  setRPrev(f ? URL.createObjectURL(f) : null);
+                }}
+              />
+              {rPrev && <img src={rPrev} style={imgPrev} />}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="submit" style={btn("linear-gradient(90deg,#7c3aed,#ec4899)")}>Guardar</button>
+                <button type="button" onClick={reset} style={btn("#6b7280")}>Cancelar</button>
+              </div>
+            </form>
+          </Panel>
+        )}
+      </AdminOnly>
     </div>
   );
+}
+
+/* Helpers UI */
+const lab: React.CSSProperties = { fontWeight: 700, marginBottom: 6, display: "block" };
+const inputCss: React.CSSProperties = { width: "100%", padding: 10, border: "1px solid #ddd", borderRadius: 8 };
+const textCss: React.CSSProperties = { ...inputCss, minHeight: 90 } as React.CSSProperties;
+const imgPrev: React.CSSProperties = { width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 8, marginTop: 8 };
+
+function btn(bg: string): React.CSSProperties {
+  return { padding: "10px 16px", border: "none", borderRadius: 8, cursor: "pointer", color: "#fff", fontWeight: 700, background: bg };
+}
+function Panel({ children }: { children: React.ReactNode }) {
+  return <div style={{ background: "#fff", border: "1px solid #eee", borderRadius: 12, padding: 16, marginTop: 16 }}>{children}</div>;
+}
+function Input({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (<div><label style={lab}>{label}</label><input style={inputCss} value={value} onChange={e => onChange(e.target.value)} /></div>);
+}
+function Text({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (<div><label style={lab}>{label}</label><textarea style={textCss} value={value} onChange={e => onChange(e.target.value)} /></div>);
 }
